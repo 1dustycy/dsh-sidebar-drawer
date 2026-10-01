@@ -145,8 +145,18 @@
 			const leading = document.getElementById("leading");
 			const SIDEBAR_WIDTH = 280;
 			const COLLAPSED_WIDTH = 0; /* darwin desktop hides the column entirely */
+			/* The shipped store keeps two preferences (stores.ts): `sidebar` is the
+			   wide-mode width, `narrowExpanded` the narrow-mode override, and
+			   SIDEBAR_AUTO_COLLAPSE picks which one decides. Crossing the threshold
+			   resets the override — a viewport-driven change nobody asked for. */
+			const SIDEBAR_AUTO_COLLAPSE = 1024;
 			let sidebar = 0;
+			let narrowExpanded = false;
 			let viewport = window.innerWidth;
+
+			function sidebarCollapsed() {
+				return viewport < SIDEBAR_AUTO_COLLAPSE ? !narrowExpanded : sidebar === 0;
+			}
 
 			const events = [];
 			function log(line) {
@@ -186,10 +196,14 @@
 			});
 
 			function applyColumns(animate) {
-				const width = sidebar === 0 ? COLLAPSED_WIDTH : SIDEBAR_WIDTH;
+				const collapsed = sidebarCollapsed();
+				const width = collapsed ? COLLAPSED_WIDTH : SIDEBAR_WIDTH;
+				/* A viewport-driven collapse deliberately starts no transition and so
+				   publishes NO `data-animating` — the shell skips its own marker when the
+				   toggle value changes in the same render as the viewport. */
 				if (animate) startAnimatingMarker();
 				frame.style.gridTemplateColumns = `${width}px minmax(0, 1fr) minmax(0px, 0px)`;
-				setCollapsedMarker(sidebar === 0);
+				setCollapsedMarker(collapsed);
 				syncLeading();
 				syncHandle();
 			}
@@ -199,8 +213,10 @@
 					return { activePanelId: null };
 				},
 				toggleSidebar() {
-					sidebar = sidebar === 0 ? SIDEBAR_WIDTH : 0;
-					log(`toggleSidebar -> sidebar=${sidebar}`);
+					/* Narrow mode toggles the override; wide mode toggles the preference. */
+					if (viewport < SIDEBAR_AUTO_COLLAPSE) narrowExpanded = !narrowExpanded;
+					else sidebar = sidebar === 0 ? SIDEBAR_WIDTH : 0;
+					log(`toggleSidebar -> sidebar=${sidebarCollapsed() ? 0 : SIDEBAR_WIDTH}`);
 					applyColumns(true);
 				},
 				selectPanel() {},
@@ -214,7 +230,7 @@
 			   left:0 straddles the reveal strip in every state — a state the shell never
 			   produces, and one that makes the plugin's whole handle branch unreachable. */
 			function syncHandle() {
-				const open = sidebar !== 0;
+				const open = !sidebarCollapsed();
 				if (open && handle.parentElement === null) frame.appendChild(handle);
 				else if (!open && handle.parentElement !== null) handle.remove();
 				handle.style.left = `${open ? SIDEBAR_WIDTH : COLLAPSED_WIDTH}px`;
@@ -244,13 +260,19 @@
 			   mounted is not faithful: it silently rescues the lookup in the one
 			   state that matters, and every open-drawer case passes for free. */
 			function syncLeading() {
-				const collapsed = sidebar === 0;
+				const collapsed = sidebarCollapsed();
 				if (collapsed && leading.parentElement === null) frame.insertBefore(leading, handle);
 				else if (!collapsed && leading.parentElement !== null) leading.remove();
 			}
 
+			/* The shipped frame measures itself (ResizeObserver -> setViewportWidth);
+			   crossing the auto-collapse threshold resets the narrow override, and the
+			   resulting collapse is viewport-driven: no toggle, no animating marker. */
 			window.addEventListener("resize", () => {
-				viewport = window.innerWidth;
+				const width = window.innerWidth;
+				if (viewport < SIDEBAR_AUTO_COLLAPSE !== width < SIDEBAR_AUTO_COLLAPSE) narrowExpanded = false;
+				viewport = width;
+				applyColumns(false);
 			});
 			applyColumns(false);
 
@@ -260,7 +282,10 @@
 				events,
 				state() {
 					return {
-						sidebar,
+						/* The EFFECTIVE width: in narrow mode the store preference and the
+						   column disagree, and every case means "is the drawer open" here. */
+						sidebar: sidebarCollapsed() ? 0 : SIDEBAR_WIDTH,
+						viewport,
 						/* Read the VALUE, not the presence: the plugin compares against the
 						   literal "true", so a presence check here would report a faithful
 						   collapsed state even when the marker's value had drifted. */

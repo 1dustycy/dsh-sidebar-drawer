@@ -112,9 +112,11 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
 `test/browser.test.mjs` 的第 1 项专门断言夹具自身的契约 —— 收起/展开两态下的锚点存续、手柄挂载、
 列宽、标记取值；`node tools/probe.mjs` 会打印每次判定的 `frameFound` 字段。两者都可直接见证这份契约。
 
-### 夹具的已知缺口
+### 窄窗口语义（两套夹具已建模）
 
-夹具尚未建模出厂 shell 的**窄窗口自动收起**（`SIDEBAR_AUTO_COLLAPSE`）。视口窄于该阈值时，
-frame 改用 `narrowExpanded`（而非 `sidebar`）决定 `sidebarCollapsed`，而且**视口驱动的收起
-刻意不发布 `data-animating`** —— 插件的延迟收回逻辑会去等一个永不出现的标记。两套夹具都把视口
-固定在宽屏，因此整条窄窗口路径目前没有任何用例覆盖。修夹具时优先补这一块。
+出厂 shell 在视口窄于 `SIDEBAR_AUTO_COLLAPSE` 时走另一套状态路径：收起态由 `narrowExpanded`
+（而非 `sidebar` 偏好）决定，跨阈值时该覆盖归零，而且**视口驱动的收起刻意不发布
+`data-animating`** —— 插件的延迟机制绝不能把"没有标记"读成"过渡刚结束"。两套夹具都建模了
+这套语义，并各有"夹具自身契约"用例守护（`client 0b`、`browser 1` 同款断言风格）；行为用例见
+behavior.md 第 20、21 行。改夹具时先问"出厂 shell 在这里到底发布什么"，工具见上文的
+`tools/shell-source.mjs`。

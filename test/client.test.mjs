@@ -193,20 +193,46 @@ function createBrowser() {
 
 	const layout = {
 		toggles: 0,
+		/* The shipped store keeps two preferences (stores.ts): `sidebar`, the wide-mode
+		   width, and `narrowExpanded`, the narrow-mode override. Exactly one decides the
+		   collapsed state — `narrow = viewport < SIDEBAR_AUTO_COLLAPSE` picks which — and
+		   toggling touches only the preference its mode owns. */
+		sidebar: 0,
+		narrowExpanded: false,
 		toggleSidebar() {
 			layout.toggles += 1;
-			/* The shipped store flips the frame marker and the frame publishes its own
-			   `data-animating` marker around the resulting transition. */
-			if (isCollapsed()) {
-				frame.removeAttribute("data-sidebar-collapsed");
-				doc.width = 280;
-			} else {
-				frame.setAttribute("data-sidebar-collapsed", "true");
-				doc.width = 0;
-			}
-			startTransition();
+			if (win.innerWidth < SIDEBAR_AUTO_COLLAPSE) layout.narrowExpanded = !layout.narrowExpanded;
+			else layout.sidebar = layout.sidebar === 0 ? SIDEBAR_WIDTH : 0;
+			/* A discrete column change flips the frame marker and the frame publishes its
+			   own `data-animating` marker around the resulting transition. */
+			applyState(true);
+		},
+		/* The shipped frame measures itself and reports the viewport; crossing the
+		   auto-collapse threshold resets the narrow override — a viewport-driven change
+		   the plugin never asked for and must never be charged to it. */
+		setViewportWidth(width) {
+			const crossing = win.innerWidth < SIDEBAR_AUTO_COLLAPSE !== width < SIDEBAR_AUTO_COLLAPSE;
+			win.innerWidth = width;
+			if (crossing) layout.narrowExpanded = false;
+			/* A viewport-driven collapse deliberately publishes NO `data-animating`. */
+			applyState(false);
 		}
 	};
+
+	const SIDEBAR_WIDTH = 280;
+	const SIDEBAR_AUTO_COLLAPSE = 1024;
+	/** Settle the frame markers from the store preferences. */
+	function applyState(animate) {
+		const collapsed = win.innerWidth < SIDEBAR_AUTO_COLLAPSE ? !layout.narrowExpanded : layout.sidebar === 0;
+		if (collapsed) {
+			frame.setAttribute("data-sidebar-collapsed", "true");
+			doc.width = 0;
+		} else {
+			frame.removeAttribute("data-sidebar-collapsed");
+			doc.width = SIDEBAR_WIDTH;
+		}
+		if (animate) startTransition();
+	}
 
 	/** The frame marks a transition, then clears the mark on its transitionend. */
 	let transitionTimer = null;
@@ -234,13 +260,25 @@ function createBrowser() {
 			}
 			frame.removeAttribute("data-animating");
 		},
+		/** A hand-close: the store's wide-mode preference goes to 0. */
 		collapse() {
+			layout.sidebar = 0;
 			frame.setAttribute("data-sidebar-collapsed", "true");
 			doc.width = 0;
 		},
+		/**
+		 * A hand-open at `width` — a narrow width models the first animation frames
+		 * of the growth toward the store's `SIDEBAR_WIDTH` preference.
+		 */
 		expand(width = 280) {
+			layout.sidebar = SIDEBAR_WIDTH;
 			frame.removeAttribute("data-sidebar-collapsed");
 			doc.width = width;
+		},
+		/** Drive a real viewport change: the layout reacts first, then the plugin hears it. */
+		resize(width) {
+			layout.setViewportWidth(width);
+			this.dispatchWindow("resize");
 		},
 		/** Model one animation frame of the shipped open/close transition. */
 		setWidth(width) {
@@ -341,6 +379,38 @@ function mount() {
 	assert.ok(browser.doc.querySelector("[data-shell-overlay]") !== null, "the overlay anchor survives the drawer opening");
 	assert.equal(browser.doc.querySelector("[data-shell-leading]"), null, "the leading seat unmounts when the drawer opens");
 	assert.ok(browser.frame.querySelector('[data-side="sidebar"]') !== null, "the sidebar handle mounts when the drawer opens");
+}
+
+/* 0b. The double models the shipped narrow-window semantics (issue #3): two store
+   preferences (`narrowExpanded` vs `sidebar`), the threshold reset, and the
+   deliberately missing `data-animating` on viewport-driven changes. */
+{
+	const browser = createBrowser();
+	browser.collapse();
+	assert.equal(browser.win.innerWidth, 1280, "the default viewport is wide");
+	browser.resize(900);
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), "true", "narrow with no override stays collapsed");
+	assert.equal(browser.frame.hasAttribute("data-animating"), false, "a viewport-driven change publishes no animating marker");
+	browser.layout.toggleSidebar();
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), null, "in narrow mode the toggle flips narrowExpanded");
+	assert.equal(browser.frame.hasAttribute("data-animating"), true, "a discrete toggle does publish the animating marker");
+	browser.endTransition();
+	browser.resize(1280);
+	assert.equal(browser.frame.hasAttribute("data-animating"), false, "crossing the threshold is viewport-driven — no marker");
+	assert.equal(
+		browser.frame.getAttribute("data-sidebar-collapsed"),
+		"true",
+		"the narrow reveal does not carry into wide mode (the sidebar preference is still 0)"
+	);
+	browser.layout.toggleSidebar();
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), null, "in wide mode the toggle flips the sidebar preference");
+	browser.endTransition();
+	browser.resize(900);
+	assert.equal(
+		browser.frame.getAttribute("data-sidebar-collapsed"),
+		"true",
+		"narrowing the window auto-collapses an open sidebar — the framework's decision, with no marker"
+	);
 }
 
 /* 1. A pointer resting in the reveal strip opens the drawer, once. */
@@ -646,9 +716,10 @@ console.log("client bundle behavior: core behavior cases passed");
 	browser.move(180, 300);
 	browser.advance(0);
 	assert.equal(browser.layout.toggles, 1, "pointer holds the drawer open");
-	/* A resize reflows the frame while no pointer event arrives. */
-	browser.win.innerWidth = 900;
-	browser.dispatchWindow("resize");
+	/* A resize reflows the frame while no pointer event arrives. Stays above the
+	   auto-collapse threshold: a crossing would be the framework's own collapse
+	   (narrow path, client 21c), not a retraction to judge here. */
+	browser.resize(1100);
 	browser.advance(800);
 	assert.equal(browser.layout.toggles, 1, "a resize cannot retract a drawer the pointer is still in");
 	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "the drawer stays revealed");
@@ -868,6 +939,72 @@ console.log("client bundle behavior: core behavior cases passed");
 	browser.expand(280); /* the hand-open settles before the dwell elapses */
 	browser.advance(1200);
 	assert.equal(browser.layout.toggles, 0, "a settled hand-open is left alone even by a dwelling pointer");
+	dispose();
+}
+
+/* 21. Narrow mode: the dwell reveals via narrowExpanded and leaving retracts. */
+{
+	const { browser, dispose } = mount();
+	browser.resize(900);
+	browser.moveAndRest(3, 200);
+	assert.equal(browser.layout.toggles, 1, "the dwell reveals in narrow mode");
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false);
+	browser.move(700, 300);
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 2, "and leaving retracts it in narrow mode");
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), "true");
+	dispose();
+}
+
+/* 21b. A viewport-driven auto-collapse is the framework's action, not this
+   behavior's drawer: it must not be counted as one — and the strip must still be
+   able to reveal afterwards (no stuck ownership). */
+{
+	const { browser, dispose } = mount();
+	browser.moveAndRest(3, 200);
+	assert.equal(browser.layout.toggles, 1, "drawer revealed");
+	browser.move(180, 300);
+	browser.advance(0);
+	/* Narrowing past the threshold auto-collapses the sidebar — no toggle, no marker. */
+	browser.resize(900);
+	assert.equal(browser.layout.toggles, 1, "the auto-collapse is not a toggle anyone asked for");
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), "true", "the framework collapsed it");
+	/* The pointer rests in the strip: the drawer must be revealable again. The wait
+	   is bounded by the in-flight transition settling plus one dwell. */
+	browser.move(3, 300);
+	browser.advance(2000);
+	assert.equal(browser.layout.toggles, 2, "the strip still reveals after an auto-collapse");
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "and the drawer is open");
+	dispose();
+}
+
+/* 21c. Widening the window auto-expands by the framework's own rule — the plugin
+   must not interfere either way. */
+{
+	const browser = createBrowser();
+	browser.expand(280);
+	browser.resize(900); /* crossing into narrow auto-collapses */
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), "true");
+	browser.layout.toggleSidebar(); /* a hand-open in narrow mode */
+	browser.endTransition();
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false);
+	browser.resize(1280); /* crossing back: narrowExpanded resets, sidebar=280 wins */
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "widening auto-expands — the framework's decision");
+	assert.equal(browser.layout.toggles, 1, "and no plugin toggle rode along");
+}
+
+/* 21d. A hand-open in narrow mode (Cmd+B flips narrowExpanded) is left alone. */
+{
+	const { browser, dispose } = mount();
+	browser.resize(900);
+	browser.layout.toggleSidebar();
+	browser.endTransition();
+	assert.equal(browser.layout.toggles, 1, "hand-opened in narrow mode");
+	browser.move(700, 300);
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 1, "an outside pointer never retracts it");
+	browser.moveAndRest(3, 300);
+	assert.equal(browser.layout.toggles, 1, "and the strip never toggles an open sidebar");
 	dispose();
 }
 

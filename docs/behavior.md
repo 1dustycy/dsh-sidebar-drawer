@@ -42,6 +42,8 @@
 | 17 | 插件卸载 | 移除全部监听器与计时器 | ✅ | client 9 |
 | 18 | 布局服务缺失 / `toggleSidebar` 抛错 | 报告错误，行为保持可用，不崩 | ✅ | client 12, 13 |
 | 19 | 手开（Cmd+B / 按钮）动画进行中，指针停在触发区 | **让路**：不发出 toggle；动画结束按当时状态重判 —— 侧栏仍收起就抽出，已手开就不碰 | ✅ | client 20, 20b, 20c, 20d · browser 18 |
+| 20 | 窄窗口里边缘停留 / 离开 | 照常抽出与收回（开合走 `narrowExpanded`） | ✅ | client 21, 21d · browser 19 |
+| 21 | 窗口跨过自动收起阈值 | **自动收起**是框架的动作：插件零 toggle、不把它记成自己抽出的抽屉，触发区事后仍能抽出（不卡死） | ✅ | client 21b, 21c · browser 19 |
 
 > 第 16 行的规则是"**只作废证据，不作结论**"：视口变了，旧坐标不再可信，所以丢弃它；但
 > "采样没了"不等于"指针走了" —— 收回是**结论**，只能建立在证据上（窗口级离开，或一次新
@@ -99,12 +101,12 @@ frame 自己发布的 `data-animating` 标记（它在每次离散列变化期�
 
 ## 已知缺口
 
-两个曾登记的缺口都已修复（各自按 `/to-spec` 的规格实现）：
+三个曾登记的缺口都已修复（各自按 `/to-spec` 的规格实现）：
 
 | # | 缺口 | 修复后的语义 | 用例 |
 |---|---|---|---|
 | 1 | 视口变更误收回指针仍在内的抽屉（[#1](https://github.com/1dustycy/dsh-sidebar-drawer/issues/1)） | 第 16 行：只作废证据，不作结论 | client 14 · browser 17 |
 | 2 | 揭示闸门不覆盖他人发起的动画（[#2](https://github.com/1dustycy/dsh-sidebar-drawer/issues/2)） | 第 19 行 · 不变量 1：动画期让路，推迟不是丢弃 | client 20–20d · browser 18 |
+| 3 | 窄窗口自动收起路径无用例覆盖、夹具未建模（[#3](https://github.com/1dustycy/dsh-sidebar-drawer/issues/3)） | 第 20、21 行：窄窗口照常抽出/收回，自动收起是框架的动作 | client 21–21d · browser 19 |
 
-另有一处**测试夹具**的已知缺口 —— 窄窗口自动收起路径目前没有任何用例覆盖，记在
-[implementation.md](./implementation.md#夹具的已知缺口)。
+窄窗口语义的夹具建模记在 [implementation.md](./implementation.md)。

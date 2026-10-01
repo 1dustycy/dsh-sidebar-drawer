@@ -446,6 +446,45 @@ try {
 		assert.equal((await state()).sidebar, 0, "the harness is reset to closed");
 	});
 
+	await check("a narrow viewport auto-collapses without a toggle and the strip still reveals", async () => {
+		/* The narrow path (issue #3): below SIDEBAR_AUTO_COLLAPSE the store flips
+		   narrowExpanded instead of the sidebar preference, crossing the threshold
+		   resets it, and the viewport-driven collapse publishes NO data-animating.
+		   The auto-collapse is the framework's action — the plugin must neither be
+		   charged for it nor lose the strip to it. */
+		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		assert.equal((await state()).sidebar, 0, "precondition: closed");
+		await dwellAtEdge(3, 400);
+		assert.equal((await state()).sidebar, 280, "revealed in wide mode");
+		await move(140, 200);
+		const before = await countToggles();
+		/* Narrow the real viewport across the threshold. */
+		await send("Emulation.setDeviceMetricsOverride", { width: 900, height: 800, deviceScaleFactor: 1, mobile: false });
+		await sleep(400);
+		assert.equal((await state()).sidebar, 0, "the framework auto-collapsed the sidebar");
+		assert.equal((await state()).collapsed, true, "the frame reports collapsed");
+		assert.equal((await countToggles()) - before, 0, "the auto-collapse asked for no toggle");
+		/* The strip must still reveal afterwards — no stuck ownership. */
+		await move(3, 400);
+		await sleep(2200);
+		assert.equal((await state()).sidebar, 280, "the strip still reveals in narrow mode");
+		/* And leaving retracts it there too. */
+		await move(700, 400);
+		await sleep(900);
+		assert.equal((await state()).sidebar, 0, "leaving retracts in narrow mode");
+		const afterNarrow = await countToggles();
+		/* Back to wide: the wide preference is still 280, so the framework auto-expands
+		   — its own rule (client 21c), with no toggle charged to the plugin. */
+		await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+		await sleep(300);
+		assert.equal((await state()).sidebar, 280, "widening auto-expands by the framework's rule");
+		assert.equal((await countToggles()) - afterNarrow, 0, "and the plugin asked for no toggle");
+		/* Hand-close to reset the harness for whatever follows. */
+		await evaluate("window.__harness.layout.toggleSidebar()");
+		await sleep(600);
+		assert.equal((await state()).sidebar, 0, "the harness ends closed");
+	});
+
 	/* Evidence shot: hold the pointer inside the revealed drawer, then capture it. */
 	await dwellAtEdge(3, 400);
 	await move(140, 200);
