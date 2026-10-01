@@ -191,17 +191,21 @@ function createBrowser() {
 		listeners: new Map()
 	};
 
+	const SIDEBAR_WIDTH = 280;
+	const SIDEBAR_AUTO_COLLAPSE = 1024;
+	/** The shipped mode rule: below the threshold the override decides, not the preference. */
+	const narrowMode = (width) => width < SIDEBAR_AUTO_COLLAPSE;
+	/* The shipped store keeps two preferences (stores.ts): `sidebar`, the wide-mode
+	   width, and `narrowExpanded`, the narrow-mode override. Exactly one decides the
+	   collapsed state — {@link narrowMode} picks which — and toggling touches only the
+	   preference its mode owns. */
 	const layout = {
 		toggles: 0,
-		/* The shipped store keeps two preferences (stores.ts): `sidebar`, the wide-mode
-		   width, and `narrowExpanded`, the narrow-mode override. Exactly one decides the
-		   collapsed state — `narrow = viewport < SIDEBAR_AUTO_COLLAPSE` picks which — and
-		   toggling touches only the preference its mode owns. */
 		sidebar: 0,
 		narrowExpanded: false,
 		toggleSidebar() {
 			layout.toggles += 1;
-			if (win.innerWidth < SIDEBAR_AUTO_COLLAPSE) layout.narrowExpanded = !layout.narrowExpanded;
+			if (narrowMode(win.innerWidth)) layout.narrowExpanded = !layout.narrowExpanded;
 			else layout.sidebar = layout.sidebar === 0 ? SIDEBAR_WIDTH : 0;
 			/* A discrete column change flips the frame marker and the frame publishes its
 			   own `data-animating` marker around the resulting transition. */
@@ -211,7 +215,7 @@ function createBrowser() {
 		   auto-collapse threshold resets the narrow override — a viewport-driven change
 		   the plugin never asked for and must never be charged to it. */
 		setViewportWidth(width) {
-			const crossing = win.innerWidth < SIDEBAR_AUTO_COLLAPSE !== width < SIDEBAR_AUTO_COLLAPSE;
+			const crossing = narrowMode(win.innerWidth) !== narrowMode(width);
 			win.innerWidth = width;
 			if (crossing) layout.narrowExpanded = false;
 			/* A viewport-driven collapse deliberately publishes NO `data-animating`. */
@@ -219,12 +223,14 @@ function createBrowser() {
 		}
 	};
 
-	const SIDEBAR_WIDTH = 280;
-	const SIDEBAR_AUTO_COLLAPSE = 1024;
+	/** The shipped collapsed rule: narrow mode reads the override, wide the preference. */
+	function sidebarCollapsed() {
+		return narrowMode(win.innerWidth) ? !layout.narrowExpanded : layout.sidebar === 0;
+	}
+
 	/** Settle the frame markers from the store preferences. */
 	function applyState(animate) {
-		const collapsed = win.innerWidth < SIDEBAR_AUTO_COLLAPSE ? !layout.narrowExpanded : layout.sidebar === 0;
-		if (collapsed) {
+		if (sidebarCollapsed()) {
 			frame.setAttribute("data-sidebar-collapsed", "true");
 			doc.width = 0;
 		} else {
@@ -738,6 +744,25 @@ console.log("client bundle behavior: core behavior cases passed");
 	dispose();
 }
 
+/* 14b. A scroll mid-dwell invalidates the dwell itself (story 5: 作废并重新计时).
+   The reveal must never fire from the stale coordinate — the scroll may well have
+   carried the strip away from under the pointer — and the timing restarts on the
+   next fresh strip sample. */
+{
+	const { browser, dispose } = mount();
+	browser.move(3, 300); /* the dwell starts */
+	browser.advance(200);
+	browser.dispatchWindow("scroll");
+	browser.advance(800);
+	assert.equal(browser.layout.toggles, 0, "the scroll must not fire the reveal from the stale coordinate");
+	browser.move(3, 300); /* a fresh sample back in the strip */
+	browser.advance(300);
+	assert.equal(browser.layout.toggles, 0, "the dwell restarts from scratch");
+	browser.advance(300);
+	assert.equal(browser.layout.toggles, 1, "and then reveals");
+	dispose();
+}
+
 /* 15. A pointer that comes back onto the strip during a retraction waits it out,
    then gets its reveal — without any further pointer movement. */
 {
@@ -1005,6 +1030,56 @@ console.log("client bundle behavior: core behavior cases passed");
 	assert.equal(browser.layout.toggles, 1, "an outside pointer never retracts it");
 	browser.moveAndRest(3, 300);
 	assert.equal(browser.layout.toggles, 1, "and the strip never toggles an open sidebar");
+	dispose();
+}
+
+/* 20e. A viewport change mid-deferral invalidates the *sample*, not the *intent*:
+   the deferred reveal lands on the next fresh strip sample. Absence of evidence is
+   not evidence of leaving — the exact fallacy issue #1 forbids. */
+{
+	const browser = createBrowser();
+	browser.frame.setAttribute("data-sidebar-collapsed", "true");
+	browser.doc.width = 40;
+	browser.startTransition();
+	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
+	browser.move(3, 300);
+	browser.advance(550); /* the dwell elapses mid-animation; the intent defers */
+	assert.equal(browser.layout.toggles, 0, "no toggle into the animation");
+	browser.dispatchWindow("scroll"); /* the sample is dropped mid-deferral */
+	assert.equal(browser.layout.toggles, 0, "the scroll draws no conclusion");
+	browser.endTransition();
+	browser.collapse();
+	browser.advance(800);
+	assert.equal(browser.layout.toggles, 0, "nothing fires from the dropped sample");
+	/* A fresh sample lands back in the strip: the parked intent lands at once. */
+	browser.move(3, 300);
+	browser.advance(200);
+	assert.equal(browser.layout.toggles, 1, "the deferred reveal is not discarded — it lands on fresh evidence");
+	dispose();
+}
+
+/* 20f. And the drop condition is real evidence: a fresh sample *outside* the strip
+   drops the parked intent (story 6) — a later return goes through the dwell again. */
+{
+	const browser = createBrowser();
+	browser.frame.setAttribute("data-sidebar-collapsed", "true");
+	browser.doc.width = 40;
+	browser.startTransition();
+	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
+	browser.move(3, 300);
+	browser.advance(550);
+	browser.dispatchWindow("scroll");
+	browser.endTransition();
+	browser.collapse();
+	browser.advance(800);
+	browser.move(300, 300); /* fresh evidence: the pointer is not in the strip */
+	browser.advance(200);
+	assert.equal(browser.layout.toggles, 0, "a pointer that left the strip must not be revealed");
+	browser.move(3, 300);
+	browser.advance(200);
+	assert.equal(browser.layout.toggles, 0, "a return to the strip re-times the dwell, not an instant reveal");
+	browser.advance(400);
+	assert.equal(browser.layout.toggles, 1, "and then reveals normally");
 	dispose();
 }
 

@@ -158,6 +158,7 @@ try {
 	};
 
 	const state = () => evaluate("window.__harness.state()");
+	const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
 	const move = async (x, y) => {
 		/* Real input events: the page sees them exactly like a user's mouse. */
 		await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0 });
@@ -220,6 +221,32 @@ try {
 		await move(900, 400);
 		await sleep(900);
 		assert.equal((await state()).sidebar, 0, "the harness is restored to closed");
+
+		/* The narrow-window contract (issue #3): below SIDEBAR_AUTO_COLLAPSE the store
+		   flips narrowExpanded instead of the sidebar preference, crossing the threshold
+		   resets it, and the viewport-driven collapse deliberately publishes NO
+		   data-animating. */
+		await send("Emulation.setDeviceMetricsOverride", { width: 900, height: 800, deviceScaleFactor: 1, mobile: false });
+		await sleep(300);
+		const narrowClosed = await probe();
+		assert.equal(narrowClosed.collapsedRaw, "true", "narrow with no override stays collapsed");
+		assert.equal(narrowClosed.width, 0, "the narrow collapsed column measures 0px");
+		assert.equal((await state()).animating, false, "the viewport-driven change published no animating marker");
+		await evaluate("window.__harness.layout.toggleSidebar()"); /* narrow mode flips narrowExpanded */
+		await sleep(150);
+		const narrowOpen = await probe();
+		assert.equal(narrowOpen.collapsedRaw, null, "in narrow mode the toggle flips narrowExpanded");
+		assert.equal((await state()).animating, true, "a discrete toggle does publish the animating marker");
+		await sleep(800); /* let the transition settle */
+		await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+		await sleep(300);
+		assert.equal(
+			(await probe()).collapsedRaw,
+			"true",
+			"crossing the threshold resets the override — the narrow state does not carry into wide mode"
+		);
+		assert.equal((await state()).animating, false, "and the crossing is viewport-driven: no marker");
+		assert.equal((await state()).sidebar, 0, "the harness is restored to closed");
 	});
 
 	await check("contact alone does not open the drawer", async () => {
@@ -251,7 +278,7 @@ try {
 		/* The gesture, then absolutely no further pointer input: the drawer must simply
 		   stay open. The handler only runs on pointer movement, so this also covers the
 		   timers that wake up on their own after the reveal. */
-		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+
 		/* Counted relative to now, not to page load: an absolute count silently depends on
 		   every case that ran before this one. */
 		const before = await countToggles();
@@ -365,13 +392,13 @@ try {
 		await evaluate("window.__harness.layout.toggleSidebar()");
 		await sleep(700);
 		assert.equal((await state()).sidebar, 280, "opened by hand");
-		const before = await evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		const before = await countToggles();
 		await move(900, 400);
 		await sleep(600);
 		assert.equal((await state()).sidebar, 280, "the behavior must not retract a hand-opened sidebar");
 		await dwellAtEdge(3, 400);
 		assert.equal((await state()).sidebar, 280, "and it must not toggle it from the edge either");
-		const after = await evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		const after = await countToggles();
 		assert.equal(after, before, "a hand-opened sidebar produced no extra toggles");
 		await evaluate("window.__harness.layout.toggleSidebar()");
 		await sleep(500);
@@ -379,9 +406,9 @@ try {
 	});
 
 	await check("no toggle happens without a pointer or a hand action", async () => {
-		const before = await evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		const before = await countToggles();
 		await sleep(1200);
-		const after = await evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		const after = await countToggles();
 		assert.equal(after, before, `an idle pointer produced a toggle (${before} -> ${after})`);
 		assert.equal((await state()).sidebar, 0, "the harness ends closed");
 	});
@@ -395,7 +422,7 @@ try {
 		await dwellAtEdge(3, 400);
 		assert.equal((await state()).sidebar, 280, "revealed from the edge");
 		await move(140, 200);
-		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+
 		const before = await countToggles();
 		/* A real wheel scroll of the document. */
 		await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 140, y: 200, deltaX: 0, deltaY: 120, button: "none", buttons: 0 });
@@ -429,7 +456,7 @@ try {
 		   alone (a hand-opened sidebar is never touched), whatever the exact timing of
 		   the dwell against the transition. */
 		assert.equal((await state()).sidebar, 0, "precondition: closed");
-		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+
 		const before = await countToggles();
 		await move(2, 300); /* the dwell starts ticking */
 		await sleep(300);
@@ -452,7 +479,7 @@ try {
 		   resets it, and the viewport-driven collapse publishes NO data-animating.
 		   The auto-collapse is the framework's action — the plugin must neither be
 		   charged for it nor lose the strip to it. */
-		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+
 		assert.equal((await state()).sidebar, 0, "precondition: closed");
 		await dwellAtEdge(3, 400);
 		assert.equal((await state()).sidebar, 280, "revealed in wide mode");
@@ -472,6 +499,21 @@ try {
 		await move(700, 400);
 		await sleep(900);
 		assert.equal((await state()).sidebar, 0, "leaving retracts in narrow mode");
+		/* A hand-open in narrow mode flips narrowExpanded — and is left alone (story 6). */
+		await evaluate("window.__harness.layout.toggleSidebar()");
+		await sleep(600);
+		assert.equal((await state()).sidebar, 280, "hand-opened in narrow mode");
+		const afterHandOpen = await countToggles();
+		await move(700, 400);
+		await sleep(700);
+		assert.equal((await state()).sidebar, 280, "an outside pointer never retracts a hand-opened sidebar");
+		await move(3, 400);
+		await sleep(800);
+		assert.equal((await state()).sidebar, 280, "and the strip never toggles it either");
+		assert.equal((await countToggles()) - afterHandOpen, 0, "the hand-opened sidebar produced no extra toggles");
+		await evaluate("window.__harness.layout.toggleSidebar()"); /* hand-close again */
+		await sleep(600);
+		assert.equal((await state()).sidebar, 0, "hand-closed for the widening check");
 		const afterNarrow = await countToggles();
 		/* Back to wide: the wide preference is still 280, so the framework auto-expands
 		   — its own rule (client 21c), with no toggle charged to the plugin. */
