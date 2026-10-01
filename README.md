@@ -11,7 +11,7 @@
 - **停留才算数** —— 指针要在左侧 10px 内连续待够 500ms 才抽出；扫过边缘不会误触。
 - **在抽屉里就保持** —— 指针停在抽屉内（阅读、点击、停留）期间一直抽出，不催你。
 - **动画期不打断** —— 开合过渡进行中绝不发第二次开合，所以不会跳变，也不会突然消失。
-- **只管自己开的** —— 你用按钮、Cmd+B 或拖拽调宽打开的侧栏，插件完全不碰。
+- **手开的侧栏不碰** —— 你用按钮、Cmd+B 或拖拽调宽开出来的侧栏（手开），插件完全不碰、从不收回。
 - **让路** —— 拖拽列宽、窗口失焦、页面滚动都有对应的让路逻辑。
 
 逐条场景、状态机不变量与已知缺口见 **[docs/behavior.md](docs/behavior.md)**。
@@ -54,8 +54,8 @@ dsh plugin --profile desktop remove dsh-sidebar-drawer
 ## 开发与验证
 
 ```bash
-node test/client.test.mjs    # 26 个用例：vm + DOM 替身 + 会推进的虚拟时钟，不需要浏览器
-node test/browser.test.mjs   # 16 个用例：真实 Chromium + CDP 真实鼠标事件与真实 CSS 动画
+node test/client.test.mjs    # 单元套件：vm + DOM 替身 + 会推进的虚拟时钟，不需要浏览器
+node test/browser.test.mjs   # 浏览器套件：真实 Chromium + CDP 真实鼠标事件与真实 CSS 动画
 npm test                     # 依次跑上面两套
 node tools/probe.mjs         # 诊断工具：打印一次边缘悬停的决策轨迹
 npm pack --dry-run           # 确认发布内容

@@ -117,7 +117,7 @@ function createBrowser() {
 			   catch. `data-sidebar-col` is not published by the shipped shell at all. */
 			if (selector === "[data-shell-overlay]") return overlay;
 			if (selector === "[data-shell-leading]") return isCollapsed() ? seat : null;
-			if (selector === "[data-sidebar-collapsed]") return frame.hasAttribute("data-sidebar-collapsed") ? frame : null;
+			if (selector === "[data-sidebar-collapsed]") return isCollapsed() ? frame : null;
 			if (selector === "[data-sidebar-col]") return null;
 			throw new Error(`unexpected selector ${selector}`);
 		},
@@ -141,7 +141,12 @@ function createBrowser() {
 	frame.children.push(column, overlay, seat);
 	doc.documentElement.children.push(frame);
 	/** The shipped frame collapses the sidebar to a zero-width column. */
-	const isCollapsed = () => frame.hasAttribute("data-sidebar-collapsed");
+	/* Read the VALUE, not the presence: the shipped shell renders
+	   `sidebarCollapsed || void 0` — the literal "true" — and the plugin compares
+	   against "true". A presence-only model would answer "collapsed" even for a
+	   fixture that wrote "" (e.g. via `toggleAttribute(name, true)`), which is
+	   exactly the silent drift this double must go red on. */
+	const isCollapsed = () => frame.getAttribute("data-sidebar-collapsed") === "true";
 	/* The sidebar drag handle is mounted only while the sidebar is open. */
 	frame.querySelector = (selector) => (selector === '[data-side="sidebar"]' && !isCollapsed() ? handle : null);
 
@@ -192,7 +197,7 @@ function createBrowser() {
 			layout.toggles += 1;
 			/* The shipped store flips the frame marker and the frame publishes its own
 			   `data-animating` marker around the resulting transition. */
-			if (frame.hasAttribute("data-sidebar-collapsed")) {
+			if (isCollapsed()) {
 				frame.removeAttribute("data-sidebar-collapsed");
 				doc.width = 280;
 			} else {
@@ -313,6 +318,29 @@ function mount() {
 	browser.collapse();
 	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
 	return { browser, dispose };
+}
+
+/* 0. The DOM double models the shipped frame contract (docs/adr/0001). A double
+   that drifts from it can go green on a broken bundle — that is how the
+   "motionless pointer loops the drawer" bug shipped past a full suite. */
+{
+	const browser = createBrowser();
+	browser.collapse();
+	assert.equal(
+		browser.frame.getAttribute("data-sidebar-collapsed"),
+		"true",
+		"the collapsed marker carries the literal true, not an empty value"
+	);
+	assert.ok(browser.doc.querySelector("[data-shell-overlay]") !== null, "the overlay anchor is unconditional");
+	assert.ok(browser.doc.querySelector("[data-shell-leading]") !== null, "the leading seat is mounted while collapsed");
+	assert.equal(browser.frame.querySelector('[data-side="sidebar"]'), null, "the sidebar handle is unmounted while collapsed");
+	assert.equal(browser.doc.querySelector("[data-sidebar-col]"), null, "data-sidebar-col is not published at all");
+	assert.equal(browser.column.getBoundingClientRect().width, 0, "the collapsed column measures exactly 0px");
+	browser.expand(280);
+	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), null, "the collapsed marker leaves the document when the drawer opens");
+	assert.ok(browser.doc.querySelector("[data-shell-overlay]") !== null, "the overlay anchor survives the drawer opening");
+	assert.equal(browser.doc.querySelector("[data-shell-leading]"), null, "the leading seat unmounts when the drawer opens");
+	assert.ok(browser.frame.querySelector('[data-side="sidebar"]') !== null, "the sidebar handle mounts when the drawer opens");
 }
 
 /* 1. A pointer resting in the reveal strip opens the drawer, once. */
@@ -642,6 +670,26 @@ console.log("client bundle behavior: core behavior cases passed");
 	browser.advance(1400);
 	assert.equal(browser.layout.toggles, 3, "the pointer that stayed on the strip is revealed once it settles");
 	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "and the drawer is open");
+	dispose();
+}
+
+/* 15b. After the retraction lands, a pointer still resting on the strip is
+   revealed again — with no further pointer movement. The window's own blur/focus
+   are the only events in between; the verdict is judged "on the strip", never on
+   a guessed position. */
+{
+	const { browser, dispose } = mount();
+	browser.moveAndRest(3, 200);
+	assert.equal(browser.layout.toggles, 1, "drawer revealed");
+	/* The window loses focus: the drawer retracts while the pointer rests at x=3. */
+	browser.leaveWindow();
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 2, "the leave retracted it");
+	/* The window comes back — and the pointer never moves again. */
+	browser.enterWindow();
+	browser.advance(2000);
+	assert.equal(browser.layout.toggles, 3, "the resting pointer on the strip is re-revealed without moving");
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "and the drawer ends open");
 	dispose();
 }
 
