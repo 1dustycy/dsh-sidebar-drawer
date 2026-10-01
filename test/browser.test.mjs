@@ -222,6 +222,42 @@ try {
 		await sleep(900);
 		assert.equal((await state()).sidebar, 0, "the harness is restored to closed");
 
+		/* The fixture models the shipped write order (issue #4): the columns are written
+		   first, the frame's own marker lands one pass later, and the app's layout read
+		   sits in between. A fixture that published the marker first would transition
+		   here, and would silently rescue the bundle from the snap these cases exist to
+		   catch — the same trap the conditional anchors set before it. */
+		const still = async () => {
+			let last = (await state()).columnWidth;
+			for (let attempt = 0; attempt < 20; attempt += 1) {
+				await sleep(100);
+				const current = await state();
+				if (!current.animating && current.columnWidth === last) return true;
+				last = current.columnWidth;
+			}
+			return false;
+		};
+		assert.equal(await still(), true, "precondition: no marker and no travel left over from the cases above");
+		await evaluate("window.__harness.resetTrace(); window.__harness.sample(true);");
+		await evaluate("window.__harness.layout.toggleSidebar()");
+		await sleep(700);
+		/* Back to closed before asserting: a failing assertion here must not leave every
+		   later case starting from an open drawer. */
+		await evaluate("window.__harness.sample(false); window.__harness.layout.toggleSidebar();");
+		await sleep(700);
+		const ownToggle = await evaluate("({ transitions: window.__harness.transitions, widths: window.__harness.widths })");
+		assert.equal((await state()).sidebar, 0, "the harness is restored to closed");
+		assert.equal(
+			ownToggle.transitions.filter((row) => row.endsWith(":frame")).length,
+			0,
+			`the fixture's own toggle must not transition — the shipped frame marks too late for that: ${JSON.stringify(ownToggle.transitions)}`
+		);
+		assert.equal(
+			new Set(ownToggle.widths).size,
+			1,
+			`and its column must jump: ${ownToggle.widths.join(",")}`
+		);
+
 		/* The narrow-window contract (issue #3): below SIDEBAR_AUTO_COLLAPSE the store
 		   flips narrowExpanded instead of the sidebar preference, crossing the threshold
 		   resets it, and the viewport-driven collapse deliberately publishes NO
@@ -525,6 +561,37 @@ try {
 		await evaluate("window.__harness.layout.toggleSidebar()");
 		await sleep(600);
 		assert.equal((await state()).sidebar, 0, "the harness ends closed");
+	});
+
+	await check("the retraction travels instead of snapping", async () => {
+		/* Issue #4: the shipped frame writes the new columns before it publishes its own
+		   `data-animating` marker, so without the behavior arming that marker first the
+		   browser adopts the new track sizes with no transition in effect and the column
+		   jumps — the drawer's close reads as an instant disappearance. This is the case
+		   that must go red if the pre-arm is ever dropped. */
+		await move(900, 400);
+		await sleep(800);
+		assert.equal((await state()).sidebar, 0, "precondition: closed");
+
+		await dwellAtEdge(3, 300);
+		assert.equal((await state()).sidebar, 280, "revealed from the edge");
+		await evaluate("window.__harness.resetTrace(); window.__harness.sample(true);");
+		await move(700, 300);
+		await sleep(1100);
+		await evaluate("window.__harness.sample(false);");
+
+		const trace = await evaluate("({ transitions: window.__harness.transitions, widths: window.__harness.widths })");
+		assert.equal((await state()).sidebar, 0, "the drawer still retracts");
+		assert.ok(
+			trace.transitions.includes("transitionrun:grid-template-columns:frame"),
+			`the frame's own column transition must run: ${JSON.stringify(trace.transitions)}`
+		);
+		assert.ok(
+			trace.transitions.includes("transitionend:grid-template-columns:frame"),
+			`and it must end on a transition, not on the frame's fallback timer: ${JSON.stringify(trace.transitions)}`
+		);
+		const travelled = trace.widths.filter((width) => width > 2 && width < 278);
+		assert.ok(travelled.length >= 3, `the column must travel, not jump: ${trace.widths.join(",")}`);
 	});
 
 	/* Evidence shot: hold the pointer inside the revealed drawer, then capture it. */

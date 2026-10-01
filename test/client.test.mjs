@@ -49,12 +49,13 @@ function loadPlugin() {
 	return exported;
 }
 
-/** One element double with the attributes and geometry the behavior reads. */
+/** One element double with the attributes, events, and geometry the behavior reads. */
 function element(name, { frame = null } = {}) {
 	const node = {
 		name,
 		attributes: new Map(),
 		children: [],
+		listeners: new Map(),
 		parentElement: frame,
 		setAttribute(key, value) {
 			this.attributes.set(key, String(value));
@@ -67,6 +68,19 @@ function element(name, { frame = null } = {}) {
 		},
 		removeAttribute(key) {
 			this.attributes.delete(key);
+		},
+		addEventListener(type, handler) {
+			this.listeners.set(type, [...(this.listeners.get(type) ?? []), handler]);
+		},
+		removeEventListener(type, handler) {
+			this.listeners.set(
+				type,
+				(this.listeners.get(type) ?? []).filter((row) => row !== handler)
+			);
+		},
+		/** Deliver a bubbling event to this element's own listeners. */
+		dispatch(type, event) {
+			for (const handler of [...(this.listeners.get(type) ?? [])]) handler(event);
 		},
 		contains(other) {
 			for (let node = other; node !== null && node !== undefined; node = node.parentElement) {
@@ -203,13 +217,27 @@ function createBrowser() {
 		toggles: 0,
 		sidebar: 0,
 		narrowExpanded: false,
+		/**
+		 * Set by a case to model a flip the shell does not animate: the store changes
+		 * but the frame publishes no marker of its own (the race a viewport change
+		 * creates inside the shell's own effect).
+		 */
+		silent: false,
+		/**
+		 * What the frame carried when the store was asked to flip. The shell writes the
+		 * columns first and publishes its marker in a second pass, so a mark here is
+		 * the behavior's own pre-arm and nothing else.
+		 */
+		markerAtToggle: null,
 		toggleSidebar() {
 			layout.toggles += 1;
+			layout.markerAtToggle = frame.getAttribute("data-animating");
 			if (narrowMode(win.innerWidth)) layout.narrowExpanded = !layout.narrowExpanded;
 			else layout.sidebar = layout.sidebar === 0 ? SIDEBAR_WIDTH : 0;
 			/* A discrete column change flips the frame marker and the frame publishes its
-			   own `data-animating` marker around the resulting transition. */
-			applyState(true);
+			   own `data-animating` marker around the resulting transition — after the
+			   columns, in a second pass, exactly as the shipped frame does it. */
+			applyState(!layout.silent);
 		},
 		/* The shipped frame measures itself and reports the viewport; crossing the
 		   auto-collapse threshold resets the narrow override — a viewport-driven change
@@ -243,7 +271,10 @@ function createBrowser() {
 	/** The frame marks a transition, then clears the mark on its transitionend. */
 	let transitionTimer = null;
 	function startTransition(durationMs = 600) {
-		frame.setAttribute("data-animating", "");
+		/* The shipped frame renders `data-animating: animating > 0 || void 0`, so the
+		   value it writes is the literal "true" — which is what the behavior compares
+		   against to tell its own pre-arm apart from a marker the shell owns. */
+		frame.setAttribute("data-animating", "true");
 		if (transitionTimer !== null) win.clearTimeout(transitionTimer);
 		transitionTimer = win.setTimeout(() => {
 			transitionTimer = null;
@@ -265,6 +296,14 @@ function createBrowser() {
 				transitionTimer = null;
 			}
 			frame.removeAttribute("data-animating");
+		},
+		/**
+		 * Deliver one transitioning event the way the browser does: it bubbles, so a
+		 * listener on the frame hears its descendants too, and `target` is wherever the
+		 * transition actually ran.
+		 */
+		transitionEnd({ target = frame, propertyName = "grid-template-columns" } = {}) {
+			frame.dispatch("transitionend", { target, currentTarget: frame, propertyName });
 		},
 		/** A hand-close: the store's wide-mode preference goes to 0. */
 		collapse() {
@@ -400,6 +439,11 @@ function mount() {
 	browser.layout.toggleSidebar();
 	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), null, "in narrow mode the toggle flips narrowExpanded");
 	assert.equal(browser.frame.hasAttribute("data-animating"), true, "a discrete toggle does publish the animating marker");
+	assert.equal(
+		browser.frame.getAttribute("data-animating"),
+		"true",
+		"the shell's own marker carries the literal true — the value the behavior's pre-arm must not be mistaken for"
+	);
 	browser.endTransition();
 	browser.resize(1280);
 	assert.equal(browser.frame.hasAttribute("data-animating"), false, "crossing the threshold is viewport-driven — no marker");
@@ -1080,6 +1124,87 @@ console.log("client bundle behavior: core behavior cases passed");
 	assert.equal(browser.layout.toggles, 0, "a return to the strip re-times the dwell, not an instant reveal");
 	browser.advance(400);
 	assert.equal(browser.layout.toggles, 1, "and then reveals normally");
+	dispose();
+}
+
+/* 22. The frame's own transition marker is armed *before* the toggle is asked for
+   (issue #4): the shell writes the columns first and publishes that marker in a
+   second pass, with a layout read in between, so a write that lands while the
+   marker is absent makes the browser adopt the new track sizes with no transition
+   in effect — the column snaps instead of travelling. */
+{
+	const { browser, dispose } = mount();
+	browser.moveAndRest(3, 200);
+	assert.equal(browser.layout.toggles, 1, "the dwell revealed the drawer");
+	assert.equal(
+		browser.layout.markerAtToggle,
+		"drawer",
+		"the frame was already armed by this behavior when the store was asked to flip"
+	);
+	assert.equal(browser.frame.getAttribute("data-animating"), "true", "and the shell's own write claims the marker");
+	dispose();
+}
+
+/* 22b. A pre-arm the shell never claims is withdrawn at the transition's end: the
+   marker is the only thing holding the transition open there, and leaving it behind
+   would have every later check read "a column is moving" against nothing. */
+{
+	const { browser, dispose } = mount();
+	/* The store flips but the frame publishes no marker of its own — the race a
+	   viewport change creates inside the shell's own effect. */
+	browser.layout.silent = true;
+	browser.moveAndRest(3, 200);
+	assert.equal(browser.layout.toggles, 1, "the dwell still reveals");
+	assert.equal(
+		browser.frame.getAttribute("data-animating"),
+		"drawer",
+		"the pre-armed marker stands while the column travels, with nothing else holding it"
+	);
+	browser.advance(150);
+	assert.equal(browser.frame.getAttribute("data-animating"), "drawer", "and it is not withdrawn mid-transition");
+	browser.transitionEnd();
+	assert.equal(
+		browser.frame.hasAttribute("data-animating"),
+		false,
+		"the marker the shell never claimed is withdrawn once the transition ends"
+	);
+	dispose();
+}
+
+/* 22c. A marker the shell owns is never the behavior's to remove — and a descendant's
+   transitionend bubbling past the frame is not the frame's own transition. */
+{
+	const { browser, dispose } = mount();
+	browser.moveAndRest(3, 200);
+	browser.transitionEnd({ target: browser.column });
+	assert.equal(
+		browser.frame.getAttribute("data-animating"),
+		"true",
+		"a descendant's transition says nothing about the frame's column"
+	);
+	browser.transitionEnd();
+	assert.equal(browser.frame.getAttribute("data-animating"), "true", "a marker the shell claimed is left to the shell");
+	browser.endTransition();
+	assert.equal(browser.frame.hasAttribute("data-animating"), false, "and the shell clears it when it settles");
+	dispose();
+}
+
+/* 22d. The withdrawal is bounded: a change that never transitions (nothing claims the
+   marker, nothing ends it) must not leave a transition that is not running standing,
+   or every later reveal defers against it. */
+{
+	const { browser, dispose } = mount();
+	browser.layout.silent = true;
+	browser.moveAndRest(3, 200);
+	browser.move(150, 300); /* step inside: no reveal intent is left waiting */
+	assert.equal(browser.frame.getAttribute("data-animating"), "drawer", "pre-armed, and nothing will claim it");
+	browser.advance(2600);
+	assert.equal(
+		browser.frame.hasAttribute("data-animating"),
+		false,
+		"a marker nothing ever claims is withdrawn at the ceiling"
+	);
+	assert.equal(browser.layout.toggles, 1, "the withdrawal itself toggles nothing");
 	dispose();
 }
 
