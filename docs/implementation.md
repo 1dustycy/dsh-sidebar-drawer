@@ -75,6 +75,29 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
 - 指针事件按帧合并（一帧只算一次），热路径是两次 `getBoundingClientRect` 与偶尔一次
   `elementFromPoint`；鼠标不动时不做任何事。
 
+## 让列宽真的滑动：预置框架自己的过渡标记
+
+出厂 frame 的列过渡**只**由它自己的 `data-animating` 发布：
+
+```css
+.frame[data-animating] { transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out) }
+```
+
+而 shell 的写入顺序是先列宽、后标记，中间还夹着一次布局读取（实测：`section._pane_*`、
+`div._tabStrip_*`、`div._stripFill_*` 的 `getBoundingClientRect`，来自 app 自己的 tab/pane
+组件在 layout effect 里的测量）—— 浏览器在那一刻就采用了新的轨道尺寸，而当时
+`transition-property` 还是 `all 0s`；第二遍才生效的过渡属性不会追认已经落地的值。**列宽因此瞬变**：
+出厂 app 里 `transitionrun/start/end` 一个都不来，`data-animating` 是被 shell 自己的 600ms
+兜底定时器清掉的，而且出厂 shell 自己的侧栏按钮也一样瞬变。
+
+所以 `toggleSidebar()` 在请求开合**之前**先调用 `armFrameMarker()`：把同一个标记写上
+（值 `PREARMED`，与 shell 的 `"true"` 可辨识），让 shell 随后写入的列宽落在一个**已经生效**的
+过渡上。shell 一旦接管，标记的所有权与生命周期都归它（它在 `transitionend` 或 600ms 兜底里清除）；
+shell 从未接管时（列宽其实没变的竞态），由本插件在该列过渡结束时撤回自己的标记，
+`ANIMATION_CEILING_MS` 只作兜底。理由与实测见 [ADR-0004](./adr/0004-arm-the-frame-before-toggling.md)。
+
+预置只发生在本插件发起的 toggle 上，所以 shell 视口驱动的那套"刻意不发布标记"的语义不受影响。
+
 ## 可调参数
 
 全部定义在 `lib/client.js` 顶部的常量块。**值以源码为准，此处刻意不复制**（复制出来的第二份真相
@@ -94,6 +117,7 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
 | `ANIMATION_HARD_STOP_MS` | 延迟收回 / 延迟抽出的绝对兜底上限 |
 | `MARK` | 挂载期间设在 documentElement 上的标记 |
 | `ANIMATING_ATTR` | 列过渡进行中的框架标记 |
+| `PREARMED` | 请求 toggle 之前预置进该标记的值（与 shell 自己的 `"true"` 可辨识） |
 | `COLLAPSED_ATTR` | 侧栏收起的框架标记 |
 | `DRAGGING_ATTR` | 正在拖拽列宽的框架标记 |
 | `LEADING_ATTR` | leading 座锚点（**条件渲染**，仅作兜底） |
@@ -109,6 +133,13 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
 
 因此：**收紧锚点模型会让用例变红，那是夹具在变忠实，不是用例坏了。** 改夹具时优先问"出厂 shell
 在这里到底发布什么"，而不是"怎么让用例过"。
+
+同一条纪律适用于**过渡标记的写入顺序**（issue #4）：出厂 frame 先写列宽、再在第二遍里发布
+`data-animating`，中间还有一次 app 自己的布局读取。夹具若按"先标记、后列宽"来写，就会让
+`transition` 无条件生效，把"收回瞬变"这个缺陷静静救回 —— 而真实 app 里列宽是瞬变的。
+两套夹具都已按出厂顺序收紧：`test/harness.html` 的 `applyColumns()` 先写列宽、再读一次布局、
+最后才 `startAnimatingMarker()`；`test/client.test.mjs` 的替身同样先落状态、后发布标记，
+并把"请求 toggle 时 frame 上带着什么标记"记进 `layout.markerAtToggle` 供用例断言。
 
 `test/browser.test.mjs` 的第 1 项专门断言夹具自身的契约 —— 收起/展开两态下的锚点存续、手柄挂载、
 列宽、标记取值；`node tools/probe.mjs` 会打印每次判定的 `frameFound` 字段。两者都可直接见证这份契约。
