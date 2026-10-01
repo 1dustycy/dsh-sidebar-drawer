@@ -1,0 +1,7 @@
+# The bundle layer this package contributes to a profile: one row mounting the
+# plugin itself. Kept as a bundle patch (rather than an entry in the profile's
+# own cordis.patch.yml) so Plugin Manager owns the row across installs,
+# updates, and other writes to the profile's user layer.
+- insert:
+    - id: ui-sidebar-drawer
+      name: dsh-sidebar-drawer

@@ -1,0 +1,55 @@
+{
+  "name": "dsh-sidebar-drawer",
+  "description": "Edge-hover drawer for the Web GUI left sidebar: reveal it by moving the pointer to the left screen edge, keep it while the pointer stays inside, retract it when the pointer leaves",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "bundle",
+    "sidebar",
+    "drawer",
+    "web-gui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1dustycy/dsh-sidebar-drawer.git"
+  },
+  "homepage": "https://github.com/1dustycy/dsh-sidebar-drawer#readme",
+  "bugs": {
+    "url": "https://github.com/1dustycy/dsh-sidebar-drawer/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.4 <5"
+  }
+}

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN" data-platform="darwin" data-ds-dark-theme>
+	<head>
+		<meta charset="utf-8" />
+		<title>sidebar drawer harness</title>
+		<style>
+			/* Mirrors the shipped AppFrame/SidebarRoot boxes: the frame owns the grid,
+			   animates its column track, and the sidebar column clips its content. */
+			html,
+			body {
+				height: 100%;
+				margin: 0;
+				background: #16181d;
+				color: #e8eaed;
+				font: 14px/1.4 -apple-system, system-ui, sans-serif;
+			}
+			#frame {
+				display: grid;
+				grid-template-rows: 100%;
+				height: 100%;
+				position: relative;
+				overflow: hidden;
+			}
+			#frame[data-animating] {
+				transition: grid-template-columns 250ms ease-in-out;
+			}
+			#frame[data-dragging] {
+				transition: none;
+			}
+			#sidebarCol {
+				background: #1c1f26;
+				border-right: 0.5px solid #2b2f38;
+				min-width: 0;
+				overflow: hidden;
+			}
+			#centerCol {
+				background: #101216;
+				display: flex;
+				flex-direction: column;
+				min-width: 0;
+				overflow: hidden;
+			}
+			#leading {
+				position: absolute;
+				top: 11px;
+				left: 88px;
+				z-index: 15;
+				display: flex;
+				align-items: center;
+			}
+			#handle {
+				position: absolute;
+				top: 0;
+				bottom: 0;
+				width: 8px;
+				margin-left: -4px;
+				z-index: 11;
+				cursor: col-resize;
+			}
+			.pad {
+				padding: 16px;
+			}
+			#log {
+				font: 12px/1.5 ui-monospace, monospace;
+				white-space: pre-wrap;
+				color: #9fd3ff;
+			}
+			.sideRow {
+				padding: 8px 12px;
+				border-radius: 6px;
+			}
+			.sideRow:hover {
+				background: #262b34;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="frame" data-sidebar-collapsed="true">
+			<div id="sidebarCol">
+				<!-- The shipped sidebar keeps its own fixed width inside the clipping
+				     column, so the inner box is wide even while the column is 0px. -->
+				<div id="sidebarRoot" style="width: 280px; height: 100%; box-sizing: border-box">
+					<div class="sideRow" id="row1">会话 A</div>
+					<div class="sideRow" id="row2">会话 B</div>
+					<div class="sideRow" id="row3">会话 C</div>
+				</div>
+			</div>
+			<div id="centerCol">
+				<div class="pad">中间内容列 —— 指针移到这里应当收回抽屉。</div>
+				<pre id="log"></pre>
+			</div>
+			<div id="leading" data-shell-leading=""></div>
+			<div id="handle" data-column-handle></div>
+		</div>
+
+		<script>
+			/* Stand-in for the shipped layout store: the sidebar preference IS the
+			   column width, and the frame animates every discrete change. */
+			const frame = document.getElementById("frame");
+			const sidebarCol = document.getElementById("sidebarCol");
+			const handle = document.getElementById("handle");
+			const SIDEBAR_WIDTH = 280;
+			const COLLAPSED_WIDTH = 0; /* darwin desktop hides the column entirely */
+			let sidebar = 0;
+			let viewport = window.innerWidth;
+
+			const events = [];
+			function log(line) {
+				events.push(line);
+				document.getElementById("log").textContent = events.join("\n");
+			}
+
+			function applyColumns(animate) {
+				const width = sidebar === 0 ? COLLAPSED_WIDTH : SIDEBAR_WIDTH;
+				if (animate) frame.setAttribute("data-animating", "");
+				frame.style.gridTemplateColumns = `${width}px minmax(0, 1fr) minmax(0px, 0px)`;
+				frame.toggleAttribute("data-sidebar-collapsed", sidebar === 0);
+				/* The shipped frame clears data-animating on transitionend, capped at 600ms. */
+				if (animate) {
+					window.setTimeout(() => frame.removeAttribute("data-animating"), 600);
+				}
+			}
+
+			const layout = {
+				get panelInfo() {
+					return { activePanelId: null };
+				},
+				toggleSidebar() {
+					sidebar = sidebar === 0 ? SIDEBAR_WIDTH : 0;
+					log(`toggleSidebar -> sidebar=${sidebar}`);
+					applyColumns(true);
+				},
+				selectPanel() {},
+				beginNavigation() {
+					return new AbortController().signal;
+				}
+			};
+
+			function syncHandle() {
+				handle.style.left = `${sidebar === 0 ? COLLAPSED_WIDTH : SIDEBAR_WIDTH}px`;
+			}
+
+			window.addEventListener("resize", () => {
+				viewport = window.innerWidth;
+			});
+			applyColumns(false);
+			syncHandle();
+
+			/* Test surface for the driving agent. */
+			window.__harness = {
+				layout,
+				events,
+				state() {
+					return {
+						sidebar,
+						collapsed: frame.hasAttribute("data-sidebar-collapsed"),
+						columnWidth: sidebarCol.getBoundingClientRect().width,
+						animating: frame.hasAttribute("data-animating")
+					};
+				},
+				marker() {
+					return document.documentElement.hasAttribute("dsh-sidebar-drawer");
+				},
+				log
+			};
+		</script>
+
+		<!-- The client bundle under test, served from the repo by the agent. -->
+		<script type="module">
+			const params = new URLSearchParams(location.search);
+			const url = params.get("plugin");
+			if (url === null) {
+				log("no ?plugin= parameter: harness only");
+			} else {
+				/* Probe surface: lets a failing case say what the page actually saw. */
+				const probe = { pointerMoves: [], checks: 0 };
+				window.__probe = probe; window.__trace = [];
+				document.addEventListener("pointermove", (event) => {
+					probe.pointerMoves.push([event.clientX, event.clientY]);
+				});
+				const bridge = {
+					__ModuleLoader__: {
+						load(record) {
+							window.__module = record;
+							window.__exports = record.factory(() => {
+								throw new Error("bundle must not require anything");
+							});
+							window.__exports.apply({
+								get: (name) => (name === "layout" ? window.__harness.layout : undefined),
+								effect: (callback) => {
+									probe.checks += 1;
+									return callback();
+								}
+							});
+							log(`module ${record.id} loaded; marker=${window.__harness.marker()}`);
+						}
+					}
+				};
+				Object.defineProperty(window, "__ModuleLoader__", { value: bridge.__ModuleLoader__, configurable: true });
+				await import(url);
+			}
+		</script>
+	</body>
+</html>
