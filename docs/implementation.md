@@ -64,7 +64,9 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
      的宽限收回，但绝不据此收回 —— 没有证据就原样保持，等新采样。
   4. 动画结束时会把"被推迟的收回"按**当时的几何**重新判一次（不是丢弃），所以鼠标走远了照样会收。
   5. 收回期间鼠标回到触发区，记下 `revealNextCheck`，动画一结束自动再抽一次 —— 不需要鼠标再动一下。
-  6. `togglePending` 闸门保证本插件不会在过渡进行中发第二次 toggle（缺口见 behavior.md）。
+  6. 闸门有两道：`togglePending`（自家 toggle 未结算）与**揭示闸门**（`reveal()` 查任何人的
+     `data-animating`）。被动画挡下的揭示意图由 `deferReveal()` 按帧标记轮询**推迟**（不是丢弃），
+     标记消失后按当时状态重判；永不撤下的标记由 `ANIMATION_HARD_STOP_MS` 兜底。
 
 - 动画是否结束**不靠猜时长**：轮询框架自己发布的 `data-animating`，所以过渡更慢的机器只是多等一会儿。
 - 只有本插件抽出的抽屉才会被本插件收回（`weOpened`）；收回动作本身有 `retracting` 标记，用来区分
@@ -86,9 +88,9 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
 | `RETAIN_MARGIN` | 越过它才算离开；此距离内一律视为"还扶着边缘" |
 | `OPEN_SETTLED_WIDTH` | 宽度阈值：超过它才算"已抽出的抽屉"而非"正在移动的边缘" |
 | `HANDLE_SELECTOR` | 侧栏列宽手柄的匹配串（视为抽屉的一部分） |
-| `ANIMATION_POLL_MS` | 延迟收回时轮询 `data-animating` 的间隔 |
+| `ANIMATION_POLL_MS` | 延迟收回 / 延迟抽出时轮询 `data-animating` 的间隔 |
 | `ANIMATION_CEILING_MS` | 轮询上限，防止框架永不撤下标记 |
-| `ANIMATION_HARD_STOP_MS` | 延迟收回的绝对兜底上限 |
+| `ANIMATION_HARD_STOP_MS` | 延迟收回 / 延迟抽出的绝对兜底上限 |
 | `MARK` | 挂载期间设在 documentElement 上的标记 |
 | `ANIMATING_ATTR` | 列过渡进行中的框架标记 |
 | `COLLAPSED_ATTR` | 侧栏收起的框架标记 |

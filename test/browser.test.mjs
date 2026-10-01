@@ -421,6 +421,31 @@ try {
 		await evaluate("window.scrollTo(0, 0)");
 	});
 
+	await check("a reveal yields to a hand-open's animation", async () => {
+		/* Cmd+B / the button starts the sidebar's own transition while the pointer is
+		   waiting out its dwell in the strip. A toggle fired into that transition
+		   cancels it and the sidebar snaps — the "sudden disappearance" this behavior
+		   exists to prevent. The reveal must let the hand-open finish and then leave it
+		   alone (a hand-opened sidebar is never touched), whatever the exact timing of
+		   the dwell against the transition. */
+		assert.equal((await state()).sidebar, 0, "precondition: closed");
+		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		const before = await countToggles();
+		await move(2, 300); /* the dwell starts ticking */
+		await sleep(300);
+		await evaluate("window.__harness.layout.toggleSidebar()"); /* the hand-open begins */
+		await sleep(600); /* the dwell fires somewhere inside this window */
+		assert.equal((await state()).sidebar, 280, "the hand-open's transition completed unbroken");
+		assert.equal((await state()).animating, false, "and the frame is settled");
+		await sleep(600);
+		assert.equal((await state()).sidebar, 280, "the hand-opened sidebar stays untouched");
+		assert.equal((await countToggles()) - before, 1, "exactly one toggle through the whole case — the hand action");
+		/* Reset for whatever follows. */
+		await evaluate("window.__harness.layout.toggleSidebar()");
+		await sleep(600);
+		assert.equal((await state()).sidebar, 0, "the harness is reset to closed");
+	});
+
 	/* Evidence shot: hold the pointer inside the revealed drawer, then capture it. */
 	await dwellAtEdge(3, 400);
 	await move(140, 200);

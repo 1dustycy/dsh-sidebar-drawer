@@ -792,6 +792,85 @@ console.log("client bundle behavior: core behavior cases passed");
 	dispose();
 }
 
+/* 20. A reveal yields to a transition someone else started: the dwell must not
+   fire a toggle into a hand-open's animation (that mid-flip is what makes a
+   just-opened sidebar "suddenly disappear"). */
+{
+	const browser = createBrowser();
+	/* A hand-open (Cmd+B / the button) is mid-animation: the marker already flipped
+	   to expanded, the column is still narrow, and the frame reports the transition.
+	   The sidebar is NOT this behavior's. */
+	browser.expand(40);
+	browser.startTransition();
+	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
+	browser.move(3, 300);
+	browser.advance(550); /* the dwell elapses while the hand-open animates */
+	assert.equal(browser.layout.toggles, 0, "no toggle is issued into someone else's animation");
+	/* The transition completes: marker off, column at its settled open width. */
+	browser.endTransition();
+	browser.setWidth(280);
+	browser.advance(1500);
+	assert.equal(browser.layout.toggles, 0, "a hand-opened sidebar swallows the deferred reveal");
+	dispose();
+}
+
+/* 20b. Deferred ≠ discarded: when the animation settles into the collapsed state
+   (a hand-close), a pointer still resting on the strip is revealed there —
+   without any further pointer movement. */
+{
+	const browser = createBrowser();
+	/* A hand-close is mid-animation: the marker already flipped to collapsed, the
+	   column is still shrinking, and the frame reports the transition. */
+	browser.frame.setAttribute("data-sidebar-collapsed", "true");
+	browser.doc.width = 40;
+	browser.startTransition();
+	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
+	browser.move(3, 300);
+	browser.advance(550); /* the dwell elapses mid-animation */
+	assert.equal(browser.layout.toggles, 0, "the hand-close's animation is not interrupted");
+	/* The transition completes collapsed. The deferred reveal must land now. */
+	browser.endTransition();
+	browser.collapse();
+	browser.advance(1500);
+	assert.equal(browser.layout.toggles, 1, "the deferred reveal lands once the animation settles");
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "and the drawer is open");
+	dispose();
+}
+
+/* 20c. A deferred reveal is dropped when the pointer walks off the strip before
+   the animation settles — the wait must not turn into an open nobody asked for. */
+{
+	const browser = createBrowser();
+	browser.frame.setAttribute("data-sidebar-collapsed", "true");
+	browser.doc.width = 40;
+	browser.startTransition();
+	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
+	browser.move(3, 300);
+	browser.advance(550);
+	assert.equal(browser.layout.toggles, 0, "no toggle into the animation");
+	browser.move(300, 300); /* the pointer walks on into the window */
+	browser.endTransition();
+	browser.collapse();
+	browser.advance(1500);
+	assert.equal(browser.layout.toggles, 0, "an intent whose pointer left the strip is not revealed");
+	dispose();
+}
+
+/* 20d. The other timeline of the same story: the hand-open settles *before* the
+   dwell fires. The dwell must re-judge at fire time and leave the hand-opened
+   sidebar alone — the "collapsed or barely open" premise is gone. */
+{
+	const browser = createBrowser();
+	browser.collapse();
+	const dispose = plugin.install({ document: browser.doc, window: browser.win, layout: browser.layout });
+	browser.move(3, 300); /* the dwell arms while the sidebar is collapsed */
+	browser.advance(100);
+	browser.expand(280); /* the hand-open settles before the dwell elapses */
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 0, "a settled hand-open is left alone even by a dwelling pointer");
+	dispose();
+}
+
 /* Derived from this file's own case headers, so the tally cannot drift away from the
    cases again: adding a case updates the count, and renumbering cannot silently make
    the reported total a lie. */
