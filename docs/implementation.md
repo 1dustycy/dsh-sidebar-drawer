@@ -32,6 +32,21 @@
 > `frameOf()` 按上表顺序回退，`columnOf()` 取 `frame.firstElementChild`（出厂 shell 的第一个
 > **真实**元素就是侧栏列 —— `DocumentTitle` 渲染 `null`，不产生元素）。
 
+### 核对这张表：直接读出厂 shell 的源码
+
+上表的唯一真相是 app 自带的 bundle，不是任何夹具。`node tools/shell-source.mjs` 能直接从
+`app.asar` 里取文件（`list` / `get` / `grep`），随时读取、绝不缓存 —— app 就地更新，昨天提取的
+副本今天就是过期的。常用流程：
+
+```bash
+node tools/shell-source.mjs grep 'data-shell-overlay|data-animating|SIDEBAR_AUTO_COLLAPSE'
+node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js /tmp/layout.js
+```
+
+两个坑（工具已处理，但读 grep 结果时要知道）：**`data-sidebar-col` 是
+`data-sidebar-collapsed` 的子串**，字节级 grep 两者都命中，必须看命中后面的字符是否闭合了这个
+属性名；asar 头里的 offset 是字符串，unpacked/link 条目没有数据偏移。
+
 ## 几何与判定
 
 - 抽屉几何取自**实时 DOM**（`elementFromPoint` 与列的 `getBoundingClientRect`），而不是镜像布局
