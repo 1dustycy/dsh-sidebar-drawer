@@ -4,8 +4,10 @@
  *
  * The instrumentation never ships: this tool rewrites `lib/client.js` in memory
  * (adding `window.__trace` records at the behavior's check points), serves that
- * copy and `test/harness.html` from its own loopback server, drives two CDP
- * mouse moves, and prints the state and trace for each step.
+ * copy and `test/harness.html` from its own loopback server, walks the pointer
+ * from the edge into the drawer and back out, and prints the state and the
+ * decision trace for each step — including whether the frame was resolvable,
+ * which is the anchor contract most of this behavior's verdicts depend on.
  *
  * Usage: node tools/probe.mjs
  */
@@ -43,8 +45,8 @@ function instrument(source) {
 			'\t\t\tfunction checkPointer() {\n\t\t\t\twindow.__trace.push({ at: "check", lastX: lastX, lastY: lastY });\n\t\t\t\tframeQueued = false;'
 		],
 		[
-			"\t\t\t\tif (!over && lastX <= EDGE_SIZE && drawerIsClosed() && !isDragging(frame)) {",
-			'\t\t\t\twindow.__trace.push({ at: "decide", over: over, edge: lastX <= EDGE_SIZE, closed: drawerIsClosed() });\n\t\t\t\tif (!over && lastX <= EDGE_SIZE && drawerIsClosed() && !isDragging(frame)) {'
+			"\t\t\t\tconst onStrip = !pointerLeftWindow && lastX <= EDGE_SIZE && !isDragging(frame);",
+			'\t\t\t\tconst onStrip = !pointerLeftWindow && lastX <= EDGE_SIZE && !isDragging(frame);\n\t\t\t\t/* `frameFound` is the anchor contract under test: the frame must stay\n\t\t\t\t   resolvable while the drawer is open, not only while it is collapsed. */\n\t\t\t\twindow.__trace.push({ at: "decide", lastX: lastX, lastY: lastY, over: over, onStrip: onStrip, weOpened: weOpened, retain: lastX <= RETAIN_MARGIN, frameFound: frame !== null });'
 		]
 	];
 	let output = source;
@@ -163,10 +165,18 @@ try {
 	await report("before any pointer input");
 	await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 3, y: 400, button: "none", buttons: 0 });
 	await sleep(700);
-	await report("after moving to the left edge (x=3)");
+	await report("after resting on the left edge (x=3) — the dwell should have revealed the drawer");
+	/* RETAIN_MARGIN is where a lost frame anchor shows up first: at or below 48px the
+	   "still leaning on the edge" branch holds the drawer without ever asking whether
+	   the pointer is inside it, so only a step past 48 exercises that verdict at all. */
+	for (const x of [20, 60, 200]) {
+		await call("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: 400, button: "none", buttons: 0 });
+		await sleep(700);
+		await report(`after stepping in to x=${x} — the drawer should still be open`);
+	}
 	await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 700, y: 400, button: "none", buttons: 0 });
 	await sleep(700);
-	await report("after moving out to the center (x=700)");
+	await report("after walking out to the center (x=700) — the drawer should have retracted");
 } finally {
 	cleanup();
 }

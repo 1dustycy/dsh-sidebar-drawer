@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-platform="darwin" data-ds-dark-theme>
+<html lang="zh-CN" data-platform="darwin">
 	<head>
 		<meta charset="utf-8" />
 		<title>sidebar drawer harness</title>
@@ -21,15 +21,33 @@
 				position: relative;
 				overflow: hidden;
 			}
+			/* Shipped values: --ds-transition-duration-slow = .3s, --ds-ease-in-out =
+			   cubic-bezier(.4,0,.2,1). A duration that disagrees with the marker model
+			   below puts the harness in a state the shell never produces. */
 			#frame[data-animating] {
-				transition: grid-template-columns 250ms ease-in-out;
+				transition: grid-template-columns 300ms cubic-bezier(0.4, 0, 0.2, 1);
 			}
 			#frame[data-dragging] {
 				transition: none;
 			}
+			@media (prefers-reduced-motion: reduce) {
+				#frame[data-animating] {
+					transition: none;
+				}
+			}
 			#sidebarCol {
 				background: #1c1f26;
 				border-right: 0.5px solid #2b2f38;
+				min-width: 0;
+				overflow: hidden;
+			}
+			/* The shipped darwin rule drops the border, which is what makes the collapsed
+			   column measure exactly 0px. Without it the column measures 1px, and the
+			   plugin's `width <= 0.5` early-out takes the opposite branch. */
+			html[data-platform="darwin"] #sidebarCol {
+				border-right: none;
+			}
+			#rightbarCol {
 				min-width: 0;
 				overflow: hidden;
 			}
@@ -39,6 +57,15 @@
 				flex-direction: column;
 				min-width: 0;
 				overflow: hidden;
+			}
+			#overlay {
+				position: absolute;
+				inset: 0;
+				z-index: 20;
+				pointer-events: none;
+			}
+			#overlay > * {
+				pointer-events: auto;
 			}
 			#leading {
 				position: absolute;
@@ -74,7 +101,7 @@
 			}
 		</style>
 	</head>
-	<body>
+	<body data-ds-dark-theme>
 		<div id="frame" data-sidebar-collapsed="true">
 			<div id="sidebarCol">
 				<!-- The shipped sidebar keeps its own fixed width inside the clipping
@@ -89,8 +116,16 @@
 				<div class="pad">中间内容列 —— 指针移到这里应当收回抽屉。</div>
 				<pre id="log"></pre>
 			</div>
+			<div id="rightbarCol" data-rightbar-col></div>
+			<!-- The shipped frame renders its overlay layer unconditionally, between the
+			     center/right columns and the leading seat. It is one of only two markers
+			     that survive the sidebar opening, so omitting it leaves the drawer with
+			     no anchor at all once the drawer is open. -->
+			<div id="overlay" data-shell-overlay></div>
 			<div id="leading" data-shell-leading=""></div>
-			<div id="handle" data-column-handle></div>
+			<!-- The shipped sidebar drag handle publishes its side and is mounted only
+			     while the sidebar is open. -->
+			<div id="handle" data-side="sidebar"></div>
 		</div>
 
 		<script>
@@ -99,6 +134,7 @@
 			const frame = document.getElementById("frame");
 			const sidebarCol = document.getElementById("sidebarCol");
 			const handle = document.getElementById("handle");
+			const leading = document.getElementById("leading");
 			const SIDEBAR_WIDTH = 280;
 			const COLLAPSED_WIDTH = 0; /* darwin desktop hides the column entirely */
 			let sidebar = 0;
@@ -110,15 +146,44 @@
 				document.getElementById("log").textContent = events.join("\n");
 			}
 
+			/* React renders `sidebarCollapsed || void 0`: the literal "true" while collapsed,
+			   and no attribute at all while open. `toggleAttribute(name, true)` would write
+			   "" instead — and the plugin compares the value against "true", so re-adding the
+			   marker that way leaves drawerIsClosed() answering false for the rest of the
+			   session while the shell would answer true. */
+			function setCollapsedMarker(collapsed) {
+				if (collapsed) frame.setAttribute("data-sidebar-collapsed", "true");
+				else frame.removeAttribute("data-sidebar-collapsed");
+			}
+
+			/* The shipped frame clears the marker on transitionend for the
+			   grid-template-columns property, with a 600ms cap in case it never lands.
+			   A timer-only model holds the marker long past its own transition end. */
+			let animationTimer = null;
+			function stopAnimatingMarker() {
+				if (animationTimer !== null) {
+					window.clearTimeout(animationTimer);
+					animationTimer = null;
+				}
+				frame.removeAttribute("data-animating");
+			}
+			function startAnimatingMarker() {
+				frame.setAttribute("data-animating", "true");
+				if (animationTimer !== null) window.clearTimeout(animationTimer);
+				animationTimer = window.setTimeout(stopAnimatingMarker, 600);
+			}
+			frame.addEventListener("transitionend", (event) => {
+				if (event.target !== frame || event.propertyName !== "grid-template-columns") return;
+				stopAnimatingMarker();
+			});
+
 			function applyColumns(animate) {
 				const width = sidebar === 0 ? COLLAPSED_WIDTH : SIDEBAR_WIDTH;
-				if (animate) frame.setAttribute("data-animating", "");
+				if (animate) startAnimatingMarker();
 				frame.style.gridTemplateColumns = `${width}px minmax(0, 1fr) minmax(0px, 0px)`;
-				frame.toggleAttribute("data-sidebar-collapsed", sidebar === 0);
-				/* The shipped frame clears data-animating on transitionend, capped at 600ms. */
-				if (animate) {
-					window.setTimeout(() => frame.removeAttribute("data-animating"), 600);
-				}
+				setCollapsedMarker(sidebar === 0);
+				syncLeading();
+				syncHandle();
 			}
 
 			const layout = {
@@ -136,15 +201,50 @@
 				}
 			};
 
+			/* The shipped sidebar handle is mounted only while the sidebar is open, and its
+			   `left` tracks the live column width. A permanently mounted handle parked at
+			   left:0 straddles the reveal strip in every state — a state the shell never
+			   produces, and one that makes the plugin's whole handle branch unreachable. */
 			function syncHandle() {
-				handle.style.left = `${sidebar === 0 ? COLLAPSED_WIDTH : SIDEBAR_WIDTH}px`;
+				const open = sidebar !== 0;
+				if (open && handle.parentElement === null) frame.appendChild(handle);
+				else if (!open && handle.parentElement !== null) handle.remove();
+				handle.style.left = `${open ? SIDEBAR_WIDTH : COLLAPSED_WIDTH}px`;
+			}
+
+			/* The shipped DragHandle publishes `data-dragging` on the frame for the
+			   duration of its pointer capture. */
+			handle.addEventListener("pointerdown", (event) => {
+				handle.setPointerCapture(event.pointerId);
+				frame.setAttribute("data-dragging", "true");
+				log("drag start");
+			});
+			for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+				handle.addEventListener(type, () => {
+					if (!frame.hasAttribute("data-dragging")) return;
+					frame.removeAttribute("data-dragging");
+					log("drag end");
+				});
+			}
+
+			/* The shipped frame mounts its leading seat only while the sidebar is
+			   collapsed (`leadingMounted = darwin && sidebarCollapsed`), so the
+			   `data-shell-leading` anchor leaves the document the moment the drawer
+			   opens — as does `data-sidebar-collapsed` itself, since React drops an
+			   attribute set to `undefined`. Both are anchors the drawer resolves its
+			   frame through, so a harness that keeps this element permanently
+			   mounted is not faithful: it silently rescues the lookup in the one
+			   state that matters, and every open-drawer case passes for free. */
+			function syncLeading() {
+				const collapsed = sidebar === 0;
+				if (collapsed && leading.parentElement === null) frame.insertBefore(leading, handle);
+				else if (!collapsed && leading.parentElement !== null) leading.remove();
 			}
 
 			window.addEventListener("resize", () => {
 				viewport = window.innerWidth;
 			});
 			applyColumns(false);
-			syncHandle();
 
 			/* Test surface for the driving agent. */
 			window.__harness = {
@@ -153,9 +253,15 @@
 				state() {
 					return {
 						sidebar,
-						collapsed: frame.hasAttribute("data-sidebar-collapsed"),
+						/* Read the VALUE, not the presence: the plugin compares against the
+						   literal "true", so a presence check here would report a faithful
+						   collapsed state even when the marker's value had drifted. */
+						collapsed: frame.getAttribute("data-sidebar-collapsed") === "true",
 						columnWidth: sidebarCol.getBoundingClientRect().width,
-						animating: frame.hasAttribute("data-animating")
+						animating: frame.hasAttribute("data-animating"),
+						dragging: frame.hasAttribute("data-dragging"),
+						handleMounted: handle.parentElement !== null,
+						leadingMounted: leading.parentElement !== null
 					};
 				},
 				marker() {

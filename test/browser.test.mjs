@@ -186,6 +186,42 @@ try {
 	assert.equal(await evaluate("typeof window.__exports"), "object", "the bundle must mount in the page");
 	assert.equal(await evaluate("window.__harness.marker()"), true, "the mounted marker must be set");
 
+	/* The fixtures are the only thing between this suite and a green run on a broken
+	   bundle: they once kept a conditional anchor permanently mounted and let a fatal
+	   bug ship. So the fixture's own frame contract is asserted, in both states. */
+	await check("the harness models the shipped frame contract in both states", async () => {
+		const probe = () =>
+			evaluate(`(() => {
+				const frame = document.getElementById("frame");
+				return {
+					collapsedRaw: frame.getAttribute("data-sidebar-collapsed"),
+					overlay: document.querySelector("[data-shell-overlay]") !== null,
+					leading: document.querySelector("[data-shell-leading]") !== null,
+					handle: document.querySelector('[data-side="sidebar"]') !== null,
+					width: Math.round(document.getElementById("sidebarCol").getBoundingClientRect().width)
+				};
+			})()`);
+
+		const closed = await probe();
+		assert.equal(closed.collapsedRaw, "true", "the collapsed marker carries the literal true, not an empty value");
+		assert.equal(closed.overlay, true, "the overlay anchor is unconditional");
+		assert.equal(closed.leading, true, "the leading seat is mounted while collapsed");
+		assert.equal(closed.handle, false, "the sidebar handle is unmounted while collapsed");
+		assert.equal(closed.width, 0, "the collapsed darwin column measures exactly 0px");
+
+		await dwellAtEdge(3, 400);
+		const open = await probe();
+		assert.equal(open.collapsedRaw, null, "the collapsed marker leaves the document when the drawer opens");
+		assert.equal(open.overlay, true, "the overlay anchor survives the drawer opening");
+		assert.equal(open.leading, false, "the leading seat unmounts when the drawer opens");
+		assert.equal(open.handle, true, "the sidebar handle mounts when the drawer opens");
+
+		/* Back to closed for the cases that follow. */
+		await move(900, 400);
+		await sleep(900);
+		assert.equal((await state()).sidebar, 0, "the harness is restored to closed");
+	});
+
 	await check("contact alone does not open the drawer", async () => {
 		assert.equal((await state()).sidebar, 0, "precondition: closed");
 		/* Touch the strip and move on before the dwell elapses. */
@@ -215,6 +251,10 @@ try {
 		/* The gesture, then absolutely no further pointer input: the drawer must simply
 		   stay open. The handler only runs on pointer movement, so this also covers the
 		   timers that wake up on their own after the reveal. */
+		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		/* Counted relative to now, not to page load: an absolute count silently depends on
+		   every case that ran before this one. */
+		const before = await countToggles();
 		const samples = [];
 		for (let i = 0; i < 20; i += 1) {
 			await sleep(200);
@@ -222,8 +262,8 @@ try {
 		}
 		const closed = samples.filter((width) => width === 0).length;
 		assert.equal(closed, 0, `the drawer closed on its own ${closed}/20 samples: ${samples.join(",")}`);
-		const toggles = await evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
-		assert.equal(toggles, 1, `exactly one toggle should have happened, saw ${toggles}`);
+		const extra = (await countToggles()) - before;
+		assert.equal(extra, 0, `a motionless pointer produced ${extra} redundant toggle(s)`);
 	});
 
 	await check("leaning a little way in during the reveal does not snap it shut", async () => {

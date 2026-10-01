@@ -16,7 +16,9 @@ import { dirname, join } from "node:path";
 import vm from "node:vm";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const bundlePath = join(here, "..", "lib", "client.js");
+/* Same override the browser harness honours, so either suite can be pointed at a
+   candidate bundle for a differential run. */
+const bundlePath = process.env.DEBUG_BUNDLE ?? join(here, "..", "lib", "client.js");
 
 /** Materialize the client bundle and return its exports. */
 function loadPlugin() {
@@ -73,7 +75,8 @@ function element(name, { frame = null } = {}) {
 			return false;
 		},
 		querySelector() {
-			/* This double has no descendants to offer; the handle is not modelled. */
+			/* Only the frame looks anything up from a node (its sidebar drag handle);
+			   every other node has no descendants to offer. */
 			return null;
 		}
 	};
@@ -107,9 +110,15 @@ function createBrowser() {
 			for (const handler of [...(doc.listeners.get(type) ?? [])]) handler(event);
 		},
 		querySelector(selector) {
+			/* The shipped shell's anchor contract (docs/adr/0001-frame-anchor-contract.md):
+			   only the overlay layer is unconditional. Treating any other anchor as always
+			   available makes the frame resolvable while the sidebar is open, which
+			   silently rescues the lookup and hides exactly the bug these doubles exist to
+			   catch. `data-sidebar-col` is not published by the shipped shell at all. */
+			if (selector === "[data-shell-overlay]") return overlay;
+			if (selector === "[data-shell-leading]") return isCollapsed() ? seat : null;
 			if (selector === "[data-sidebar-collapsed]") return frame.hasAttribute("data-sidebar-collapsed") ? frame : null;
-			if (selector === "[data-shell-leading]") return seat;
-			if (selector === "[data-sidebar-col]") return column;
+			if (selector === "[data-sidebar-col]") return null;
 			throw new Error(`unexpected selector ${selector}`);
 		},
 		elementFromPoint(x, y) {
@@ -120,12 +129,21 @@ function createBrowser() {
 
 	const frame = element("frame");
 	const column = element("column", { frame });
+	const overlay = element("overlay", { frame });
 	const seat = element("leading", { frame });
+	const handle = element("handle", { frame });
 	const inside = element("sidebar-content", { frame: column });
 	const outside = element("conversation");
 	column.children.push(inside);
-	frame.children.push(column, seat);
+	/* Frame child order mirrors the shipped AppFrame: the sidebar column first, then
+	   the overlay layer, then the chrome seats that are mounted only while the sidebar
+	   is collapsed. `columnOf` reads `firstElementChild`, so this order is load-bearing. */
+	frame.children.push(column, overlay, seat);
 	doc.documentElement.children.push(frame);
+	/** The shipped frame collapses the sidebar to a zero-width column. */
+	const isCollapsed = () => frame.hasAttribute("data-sidebar-collapsed");
+	/* The sidebar drag handle is mounted only while the sidebar is open. */
+	frame.querySelector = (selector) => (selector === '[data-side="sidebar"]' && !isCollapsed() ? handle : null);
 
 	column.getBoundingClientRect = () => ({ left: 0, top: 0, right: doc.width, bottom: 800, width: doc.width, height: 800 });
 
@@ -536,7 +554,10 @@ function mount() {
 	assert.equal(browser.layout.toggles, 1, "apply() mounts a working behavior");
 }
 
-console.log("client bundle behavior: 10 cases passed");
+/* Progress marker only: the suite has no runner, so a numeric tally here could only
+   be kept by hand — and a hand-kept tally is what made this line claim a count that
+   did not match the cases above it. The real total is derived at the end of the file. */
+console.log("client bundle behavior: core behavior cases passed");
 
 /* 11. The bundle's module face matches the loader contract. */
 {
@@ -708,4 +729,8 @@ console.log("client bundle behavior: 10 cases passed");
 	dispose();
 }
 
-console.log("client bundle contract: 24 cases passed");
+/* Derived from this file's own case headers, so the tally cannot drift away from the
+   cases again: adding a case updates the count, and renumbering cannot silently make
+   the reported total a lie. */
+const caseCount = (readFileSync(new URL(import.meta.url), "utf8").match(/^\/\* \d+[a-z]?\. /gm) ?? []).length;
+console.log(`client bundle contract: ${caseCount} cases passed`);

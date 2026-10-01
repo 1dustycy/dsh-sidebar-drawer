@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "scripts": {
+    "test": "node test/client.test.mjs && node test/browser.test.mjs"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": {
