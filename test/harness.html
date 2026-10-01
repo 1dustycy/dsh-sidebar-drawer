@@ -21,6 +21,13 @@
 				position: relative;
 				overflow: hidden;
 			}
+			/* The shipped app's document scrolls in some views — the reported "scrolling
+			   inside the drawer retracts it" case. A spacer below the frame gives this
+			   harness a real scrollable document, so a wheel scroll is a real viewport
+			   change with real reflow, not a synthetic event. */
+			#scrollSpacer {
+				height: 400px;
+			}
 			/* Shipped values: --ds-transition-duration-slow = .3s, --ds-ease-in-out =
 			   cubic-bezier(.4,0,.2,1). A duration that disagrees with the marker model
 			   below puts the harness in a state the shell never produces. */
@@ -127,6 +134,7 @@
 			     while the sidebar is open. -->
 			<div id="handle" data-side="sidebar"></div>
 		</div>
+		<div id="scrollSpacer"></div>
 
 		<script>
 			/* Stand-in for the shipped layout store: the sidebar preference IS the

@@ -635,7 +635,10 @@ console.log("client bundle behavior: core behavior cases passed");
 	dispose();
 }
 
-/* 14. A reflow retracts a drawer the pointer never re-confirmed. */
+/* 14. A viewport change (page scroll / window resize) only invalidates evidence —
+   it must never draw the "pointer left" conclusion by itself. The stale sample is
+   dropped and any pending dwell or grace close is cancelled; the drawer keeps its
+   state until a fresh sample arrives. */
 {
 	const { browser, dispose } = mount();
 	browser.moveAndRest(3, 200);
@@ -647,7 +650,19 @@ console.log("client bundle behavior: core behavior cases passed");
 	browser.win.innerWidth = 900;
 	browser.dispatchWindow("resize");
 	browser.advance(800);
-	assert.equal(browser.layout.toggles, 2, "a reflow cannot pin the drawer open");
+	assert.equal(browser.layout.toggles, 1, "a resize cannot retract a drawer the pointer is still in");
+	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "the drawer stays revealed");
+	/* A page scroll mid-grace: the queued retraction must be cancelled too. */
+	browser.move(600, 300);
+	browser.advance(80);
+	assert.equal(browser.timersOf(260), 1, "a close is queued");
+	browser.dispatchWindow("scroll");
+	browser.advance(800);
+	assert.equal(browser.layout.toggles, 1, "a scroll during the grace cancels the queued retraction");
+	/* And a real exit afterwards still retracts: this must not become "never closes". */
+	browser.move(600, 300);
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 2, "a fresh outside sample still retracts the drawer");
 	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), true);
 	dispose();
 }

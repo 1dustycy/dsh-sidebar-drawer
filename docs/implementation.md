@@ -59,9 +59,12 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
   1. 抽出后 `lastX <= RETAIN_MARGIN` 一律视为"还扶着边缘"，保持抽出。
   2. "指针在外面"的判定要经过 `CLOSE_DELAY_MS` 后的第二次确认；确认时若框架还在 `data-animating`
      （或自家 toggle 未结算），收回**不执行**，只重新武装，等动画真的停下再判。
-  3. 动画结束时会把"被推迟的收回"按**当时的几何**重新判一次（不是丢弃），所以鼠标走远了照样会收。
-  4. 收回期间鼠标回到触发区，记下 `revealNextCheck`，动画一结束自动再抽一次 —— 不需要鼠标再动一下。
-  5. `togglePending` 闸门保证本插件不会在过渡进行中发第二次 toggle（缺口见 behavior.md）。
+  3. **收回是结论，结论必须有证据**（`pointerProvenOutside`）：窗口级离开，或一次仍有效的采样量在
+     外面。**视口变更只作废证据、不作结论**（`onViewportChange`）：丢弃过期采样、取消停留与已排队
+     的宽限收回，但绝不据此收回 —— 没有证据就原样保持，等新采样。
+  4. 动画结束时会把"被推迟的收回"按**当时的几何**重新判一次（不是丢弃），所以鼠标走远了照样会收。
+  5. 收回期间鼠标回到触发区，记下 `revealNextCheck`，动画一结束自动再抽一次 —— 不需要鼠标再动一下。
+  6. `togglePending` 闸门保证本插件不会在过渡进行中发第二次 toggle（缺口见 behavior.md）。
 
 - 动画是否结束**不靠猜时长**：轮询框架自己发布的 `data-animating`，所以过渡更慢的机器只是多等一会儿。
 - 只有本插件抽出的抽屉才会被本插件收回（`weOpened`）；收回动作本身有 `retracting` 标记，用来区分

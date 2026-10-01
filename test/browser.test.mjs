@@ -386,6 +386,41 @@ try {
 		assert.equal((await state()).sidebar, 0, "the harness ends closed");
 	});
 
+	await check("a page scroll never retracts a drawer the pointer is still in", async () => {
+		/* The reported feel: reading inside the drawer, scrolling the page — and the
+		   drawer vanished. A viewport change only invalidates the pointer sample (the
+		   drawer moved under a pointer that never moved); it must never conclude
+		   "the pointer left" by itself. Real scroll, real reflow, real hit testing. */
+		assert.equal((await state()).sidebar, 0, "precondition: closed");
+		await dwellAtEdge(3, 400);
+		assert.equal((await state()).sidebar, 280, "revealed from the edge");
+		await move(140, 200);
+		const countToggles = () => evaluate("window.__harness.events.filter((line) => line.startsWith('toggleSidebar')).length");
+		const before = await countToggles();
+		/* A real wheel scroll of the document. */
+		await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 140, y: 200, deltaX: 0, deltaY: 120, button: "none", buttons: 0 });
+		await sleep(150);
+		assert.ok((await evaluate("window.scrollY")) > 0, "the page actually scrolled");
+		await sleep(800);
+		assert.equal((await state()).sidebar, 280, "the drawer stays revealed through the scroll");
+		assert.equal((await state()).collapsed, false, "the frame still reports an open sidebar");
+		/* A scroll mid-grace cancels the queued retraction too, or the fix only covers
+		   half of the cases. */
+		await move(700, 400);
+		await sleep(80);
+		await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 700, y: 400, deltaX: 0, deltaY: -120, button: "none", buttons: 0 });
+		await sleep(800);
+		assert.equal((await state()).sidebar, 280, "a scroll during the grace cancels the queued retraction");
+		/* A real exit afterwards still retracts: this must not become "never closes". */
+		await move(140, 200);
+		await move(700, 400);
+		await sleep(700);
+		assert.equal((await state()).sidebar, 0, "a fresh outside sample still retracts the drawer");
+		assert.equal((await countToggles()) - before, 1, "exactly one toggle through the whole case — the real exit");
+		/* Restore the scroll so the cases after this one see the layout they expect. */
+		await evaluate("window.scrollTo(0, 0)");
+	});
+
 	/* Evidence shot: hold the pointer inside the revealed drawer, then capture it. */
 	await dwellAtEdge(3, 400);
 	await move(140, 200);
