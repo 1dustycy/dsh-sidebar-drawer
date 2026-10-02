@@ -24,7 +24,10 @@ Row-by-row scenarios, state-machine invariants, and known gaps: **[docs/behavior
 This is a DSH **plugin bundle**: it ships its own `cordis.patch.yml` and declares `dsh.bundle.patch` in `package.json`, so Plugin Manager installs it and owns the mount row — **you never hand-edit the profile's patch file**.
 
 ```bash
-# From GitHub (recommended: pins the version with a tag)
+# From npm (recommended: pins the version)
+dsh plugin --profile desktop add dsh-sidebar-drawer@0.1.0
+
+# From GitHub (also version-pinned, through the repo's v0.1.0 tag)
 dsh plugin --profile desktop add "github:1dustycy/dsh-sidebar-drawer#v0.1.0"
 
 # Track the latest commit on main (to pick up behavior changes early)
@@ -44,7 +47,7 @@ dsh plugin --profile desktop remove dsh-sidebar-drawer
 
 > Why not just add a row to the profile's `cordis.patch.yml`? That file is shared with other sessions, and when it gets overwritten the symptom is a plugin that looks installed but does nothing — with nothing in the plugin itself to show for it. Rationale in [ADR-0003](docs/adr/0003-bundle-patch-ownership.md).
 
-**Requirements**: DSH Desktop (or any profile with a Web GUI). The client half injects `@deepseek-ai/dsh-client-ui-layout`, so the target profile must already mount the Web layout bundle. `peerDependencies` is `@deepseek-ai/cordis >=4.0.4 <5`. Not published to npm yet.
+**Requirements**: DSH Desktop (or any profile with a Web GUI). The client half injects `@deepseek-ai/dsh-client-ui-layout`, so the target profile must already mount the Web layout bundle. `peerDependencies` is `@deepseek-ai/cordis >=4.0.4 <5` — when installing from a registry, Plugin Manager checks that range first and refuses before anything is downloaded if it does not match.
 
 ## Development and verification
 

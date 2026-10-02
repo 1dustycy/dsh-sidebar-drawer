@@ -26,7 +26,10 @@
 `dsh.bundle.patch`，所以它由 Plugin Manager 安装并托管挂载行 —— **不需要你手改 profile 的补丁文件**。
 
 ```bash
-# 从 GitHub 安装（推荐，带 tag 钉住版本）
+# 从 npm 安装（推荐，带版本钉住）
+dsh plugin --profile desktop add dsh-sidebar-drawer@0.1.0
+
+# 从 GitHub 安装（同样钉住版本，走仓库的 v0.1.0 tag）
 dsh plugin --profile desktop add "github:1dustycy/dsh-sidebar-drawer#v0.1.0"
 
 # 跟随 main 最新提交（便于拿到最新行为改动）
@@ -53,7 +56,8 @@ dsh plugin --profile desktop remove dsh-sidebar-drawer
 
 **要求**：DSH Desktop（或任何带 Web GUI 的 profile）。客户端半边注入
 `@deepseek-ai/dsh-client-ui-layout`，所以目标 profile 必须已挂载 Web 布局 bundle。
-`peerDependencies` 为 `@deepseek-ai/cordis >=4.0.4 <5`。尚未发布到 npm。
+`peerDependencies` 为 `@deepseek-ai/cordis >=4.0.4 <5` —— 从 registry 安装时 Plugin Manager 会先
+核对这一条，不兼容就在下载之前拒绝。
 
 ## 开发与验证
 
