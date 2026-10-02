@@ -693,11 +693,14 @@ function mount() {
 	dispose();
 }
 
-/* 9. Disposal removes every listener and timer. */
+/* 9. Disposal removes every listener and timer — document, window, and the frame
+   transition listener the pre-arm attaches. */
 {
 	const { browser, dispose } = mount();
 	browser.moveAndRest(3, 200);
 	browser.move(600, 300);
+	/* The reveal pre-armed the frame, so its transitionend listener is attached. */
+	assert.equal((browser.frame.listeners.get("transitionend") ?? []).length, 1, "the pre-arm listens on the frame");
 	dispose();
 	/* The frame's own transition marker is the harness's, not the behavior's. */
 	browser.endTransition();
@@ -705,7 +708,13 @@ function mount() {
 	const before = browser.layout.toggles;
 	browser.advance(2000);
 	assert.equal(browser.layout.toggles, before, "no work after disposal");
-	assert.equal(browser.doc.listeners.get("pointermove").length, 0);
+	for (const type of ["pointermove", "pointerleave", "pointerenter"]) {
+		assert.equal((browser.doc.listeners.get(type) ?? []).length, 0, `the document ${type} listener is gone`);
+	}
+	for (const type of ["resize", "scroll", "blur", "focus"]) {
+		assert.equal((browser.win.listeners.get(type) ?? []).length, 0, `the window ${type} listener is gone`);
+	}
+	assert.equal((browser.frame.listeners.get("transitionend") ?? []).length, 0, "the frame transition listener is gone");
 	assert.equal(browser.doc.documentElement.hasAttribute("dsh-sidebar-drawer"), false);
 }
 
@@ -771,15 +780,25 @@ console.log("client bundle behavior: core behavior cases passed");
 	const originalError = console.error;
 	const errors = [];
 	console.error = (...args) => errors.push(args);
+	const realToggle = browser.layout.toggleSidebar.bind(browser.layout);
+	let failing = true;
+	browser.layout.toggleSidebar = () => {
+		if (failing) throw new Error("store closed");
+		realToggle();
+	};
 	try {
-		browser.layout.toggleSidebar = () => {
-			throw new Error("store closed");
-		};
 		browser.moveAndRest(3, 200);
 	} finally {
 		console.error = originalError;
 	}
 	assert.equal(errors.length, 1, "the failure surfaces as one diagnostic");
+	/* Contained, not fatal: the store recovers, and the next gesture goes through. */
+	failing = false;
+	browser.moveAndRest(3, 200);
+	assert.equal(browser.layout.toggles, 1, "the behavior still reveals once the store recovers");
+	browser.move(600, 300);
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 2, "and still retracts");
 	dispose();
 }
 
@@ -816,10 +835,11 @@ console.log("client bundle behavior: core behavior cases passed");
 	dispose();
 }
 
-/* 14b. A scroll mid-dwell invalidates the dwell itself (story 5: 作废并重新计时).
-   The reveal must never fire from the stale coordinate — the scroll may well have
-   carried the strip away from under the pointer — and the timing restarts on the
-   next fresh strip sample. */
+/* 14b. A scroll mid-dwell invalidates the dwell itself (issue #1 story 5, as
+    corrected: the dwell is voided, and the re-timing lands on the evidence — the next
+    fresh strip sample — not on the scroll). The reveal must never fire from the stale
+    coordinate; the scroll may well have carried the strip away from under the
+    pointer — and the timing restarts from zero when the pointer next lands there. */
 {
 	const { browser, dispose } = mount();
 	browser.move(3, 300); /* the dwell starts */
@@ -1075,19 +1095,43 @@ console.log("client bundle behavior: core behavior cases passed");
 	dispose();
 }
 
-/* 21c. Widening the window auto-expands by the framework's own rule — the plugin
-   must not interfere either way. */
+/* 21c. Widening the window auto-expands by the framework's own rule — and with the
+   behavior mounted and the pointer dwelling in the strip, that restore is still the
+   framework's decision alone (issue #3 story 5). */
 {
-	const browser = createBrowser();
-	browser.expand(280);
+	const { browser, dispose } = mount();
+	assert.equal(
+		browser.doc.documentElement.hasAttribute("dsh-sidebar-drawer"),
+		true,
+		"the behavior really is mounted — without it, every assertion below would hold vacuously"
+	);
+	browser.expand(280); /* the wide-mode preference the framework restores below */
 	browser.resize(900); /* crossing into narrow auto-collapses */
 	assert.equal(browser.frame.getAttribute("data-sidebar-collapsed"), "true");
 	browser.layout.toggleSidebar(); /* a hand-open in narrow mode */
 	browser.endTransition();
+	assert.equal(browser.layout.toggles, 1, "hand-opened in narrow mode");
 	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false);
-	browser.resize(1280); /* crossing back: narrowExpanded resets, sidebar=280 wins */
-	assert.equal(browser.frame.hasAttribute("data-sidebar-collapsed"), false, "widening auto-expands — the framework's decision");
+	/* The pointer comes to rest in the strip: over an open sidebar there is nothing to
+	   reveal, so the dwell must pass without a toggle. */
+	browser.move(3, 300);
+	browser.advance(1200);
+	assert.equal(browser.layout.toggles, 1, "a dwelling pointer never toggles an open sidebar");
+	/* Crossing back: narrowExpanded resets and the wide preference (280) wins. */
+	browser.resize(1280);
+	assert.equal(
+		browser.frame.hasAttribute("data-sidebar-collapsed"),
+		false,
+		"widening auto-expands — the framework's decision"
+	);
+	browser.advance(2000);
 	assert.equal(browser.layout.toggles, 1, "and no plugin toggle rode along");
+	assert.equal(
+		browser.frame.hasAttribute("data-sidebar-collapsed"),
+		false,
+		"the expanded state the framework restored is left exactly as it found it"
+	);
+	dispose();
 }
 
 /* 21d. A hand-open in narrow mode (Cmd+B flips narrowExpanded) is left alone. */

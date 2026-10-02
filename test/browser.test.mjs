@@ -238,8 +238,14 @@ try {
 			return false;
 		};
 		assert.equal(await still(), true, "precondition: no marker and no travel left over from the cases above");
-		await evaluate("window.__harness.resetTrace(); window.__harness.sample(true);");
-		await evaluate("window.__harness.layout.toggleSidebar()");
+		/* Reset, start sampling, and toggle in one task. The harness samples every
+		   animation frame, so splitting these across separate round-trips let a frame
+		   slip in between and record the pre-toggle width — which made `new Set(widths)`
+		   see the closed rail as a second distinct value and failed the jump assertion
+		   about one run in eight. */
+		await evaluate(
+			"window.__harness.resetTrace(); window.__harness.sample(true); window.__harness.layout.toggleSidebar();"
+		);
 		await sleep(700);
 		/* Back to closed before asserting: a failing assertion here must not leave every
 		   later case starting from an open drawer. */
@@ -413,7 +419,7 @@ try {
 		assert.equal((await state()).sidebar, 0, "the drawer retracted");
 	});
 
-	await check("a closed drawer reopens on the next edge hover", async () => {
+	await check("a closed drawer reopens on the next edge dwell", async () => {
 		await move(600, 400);
 		await sleep(200);
 		await move(2, 250);
@@ -613,5 +619,9 @@ if (failures > 0) {
 	console.log(`browser harness: ${failures} case(s) failed`);
 	process.exit(1);
 }
-console.log("browser harness: all cases passed");
+/* Derived from this file's own `check()` calls, the same way the client suite derives
+   its tally: adding a case updates the count, and the reported total cannot drift away
+   from the cases again. */
+const caseCount = (readFileSync(new URL(import.meta.url), "utf8").match(/await check\(/g) ?? []).length;
+console.log(`browser harness: ${caseCount} cases passed`);
 process.exit(0);
