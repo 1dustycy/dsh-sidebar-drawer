@@ -6,7 +6,7 @@ An edge-hover drawer for the left sidebar: while the sidebar is collapsed, movin
 
 A pure browser-behavior plugin (the host half is empty). It only borrows DSH's own sidebar toggling and changes no built-in file.
 
-![The drawer revealed](docs/harness-open.png)
+![Revealing and retracting the drawer](docs/drawer-demo.gif)
 
 ## What it does
 
@@ -58,7 +58,7 @@ npm pack --dry-run           # confirm what gets published
 
 After editing `lib/client.js`, **refresh the page** and the change is live (provided the profile's `hmr` row is enabled, which the desktop profile does by default).
 
-`test/browser.test.mjs` brings its own HTTP server and browser process and exits when it is done; it needs Chromium on the machine (it skips itself when none is found). `SHOT=<path> node test/browser.test.mjs` saves the final "drawer open" frame as a PNG (that is where `docs/harness-open.png` comes from). `test/harness.html` is a faithful replica of the shipped three-column frame: open it in a browser with `?plugin=<URL of client.js>` to try the behavior by hand.
+`test/browser.test.mjs` brings its own HTTP server and browser process and exits when it is done; it needs Chromium on the machine (it skips itself when none is found). `SHOT=<path> node test/browser.test.mjs` saves the final "drawer open" frame as a PNG (that is where `docs/harness-open.png` comes from). The animation at the top is the other way round — a **screen recording of the real GUI**, not the fixture — and `node tools/demo-gif.mjs <recording>` regenerates it, which needs ffmpeg on the machine. `test/harness.html` is a faithful replica of the shipped three-column frame: open it in a browser with `?plugin=<URL of client.js>` to try the behavior by hand.
 
 > **Read [docs/implementation.md](docs/implementation.md#测试夹具必须与出厂契约同步) before touching the test fixtures.**
 > Both fixtures must model the shipped shell's anchor contract exactly: once a fixture renders a conditional anchor unconditionally, it goes all-green on a broken bundle — which is precisely how this plugin once shipped a defect where a pointer resting motionless on the edge toggled the drawer forever.

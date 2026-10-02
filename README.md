@@ -6,7 +6,7 @@
 
 一个纯浏览器行为插件（Host 半边是空的），只借用 DSH 自己的侧栏开合，不改动任何内置文件。
 
-![抽屉抽出时的样子](docs/harness-open.png)
+![抽屉抽出与收回的演示](docs/drawer-demo.gif)
 
 ## 它会做什么
 
@@ -69,8 +69,9 @@ npm pack --dry-run           # 确认发布内容
 
 `test/browser.test.mjs` 自带 HTTP 服务与浏览器进程，跑完即退出；需要本机有 Chromium（找不到会自动跳过）。
 `SHOT=<路径> node test/browser.test.mjs` 会把最后"抽屉打开"的画面存成 PNG（`docs/harness-open.png`
-即由此生成）。`test/harness.html` 是内置三栏框架的等价复刻，用浏览器直接打开并加
-`?plugin=<client.js 的 URL>` 也能手工试。
+即由此生成）。顶部那张动图反过来 —— 它是**真实 GUI 的屏幕录制**，不是夹具 —— 用
+`node tools/demo-gif.mjs <录屏文件>` 重新生成，需要本机有 ffmpeg。`test/harness.html` 是内置三栏
+框架的等价复刻，用浏览器直接打开并加 `?plugin=<client.js 的 URL>` 也能手工试。
 
 > **改测试夹具前请先读** [docs/implementation.md](docs/implementation.md#测试夹具必须与出厂契约同步)。
 > 两套夹具必须精确建模出厂 shell 的锚点契约：夹具一旦把条件锚点写成常驻，就会在一个已损坏的
