@@ -11,6 +11,14 @@
 
 ## Consequences
 
-`pointerOverDrawer()` 对宽度不足 `OPEN_SETTLED_WIDTH` 的列直接返回 false（除非找到已挂载的手柄），
-于是这个宽度信号**只有抽出闸门一个消费者**。收起态由 `drawerIsClosed()` 决定（读 frame 自己的标记），
-而不是靠宽度推断 —— 窄列同样意味着动画期（抽出还没走完），把它读成收起会取消指针要求的收回动作。
+宽度不足 `OPEN_SETTLED_WIDTH` 的列，**命中测试那一段**被 `pointerOverDrawer()` 挡掉（除非找到已挂载的
+手柄）——被 `overflow: hidden` 裁掉的全宽内容盒正是从那里读出来的。但整条函数并不是"窄列一律
+返回 false"：盒子判定排在前面，56px 图标栏那种宽度会从那里返回 true。
+
+真正让这条不变量成立的是 `checkPointer()` 的提前返回：收起态走触发区分支并就地 return，
+`over` 虽被算出来，却轮不到参与判定；再往后还有一道 `if (!weOpened) return;`。而
+`pointerProvenOutside()` 的两个消费者（宽限到期、toggle 结算）都在 `weOpened` 为真时才会问它。
+零宽收起态由 `rect.width <= 0.5` 那一行挡住。
+
+收起态由 `drawerIsClosed()` 决定（读 frame 自己的标记），而不是靠宽度推断 —— 窄列同样意味着
+动画期（抽出还没走完），把它读成收起会取消指针要求的收回动作。

@@ -55,7 +55,7 @@ dsh plugin --profile desktop remove dsh-sidebar-drawer
 node test/client.test.mjs    # unit suite: vm + DOM doubles + an advancing virtual clock, no browser needed
 node test/browser.test.mjs   # browser suite: real Chromium + CDP real mouse events and real CSS animations
 npm test                     # runs both suites, in that order
-node tools/probe.mjs         # diagnostic tool: prints the decision trail of one edge hover
+node tools/probe.mjs         # diagnostic tool: prints the decision trail of one edge dwell
 npm pack --dry-run           # confirm what gets published
 ```
 

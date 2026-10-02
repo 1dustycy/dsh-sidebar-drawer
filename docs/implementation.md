@@ -20,17 +20,22 @@
 插件的几何判定全部取自**实时 DOM**，所以它依赖 shell 发布的这一组标记。**只有第一个是无条件的**，
 详见 [ADR-0001](./adr/0001-frame-anchor-contract.md)：
 
-| 标记 | 谁发布 | 渲染条件 |
-|---|---|---|
-| `data-shell-overlay` | frame 的 overlay 层 | **无条件** —— frame 定位的首选锚点 |
-| `data-sidebar-collapsed` | frame | 仅收起时（展开时 React 移除该属性） |
-| `data-shell-leading` | frame 的 leading 座 | 仅 darwin 且收起时 |
-| `data-animating` | frame | 仅列过渡期间，`transitionend` 时清除 |
-| `data-dragging` | frame | 仅拖拽期间 |
-| `data-side` | 列宽手柄 | 仅**展开**时挂载；侧栏手柄取值 `"sidebar"` |
+| 标记 | 谁发布 | 渲染条件 | 参与 `frameOf()` 定位 |
+|---|---|---|---|
+| `data-shell-overlay` | frame 的 overlay 层 | **无条件** —— frame 定位的首选锚点 | 是（第一级） |
+| `data-sidebar-collapsed` | frame | 仅收起时（展开时 React 移除该属性） | 是（第二级） |
+| `data-shell-leading` | frame 的 leading 座 | 仅 darwin 且收起时 | 是（第三级） |
+| `data-animating` | frame | 仅列过渡期间，`transitionend` 时清除 | 否 |
+| `data-dragging` | frame | 仅拖拽期间 | 否 |
+| `data-side` | 列宽手柄 | 仅**展开**时挂载；侧栏手柄取值 `"sidebar"` | 否 |
 
-> `frameOf()` 按上表顺序回退，`columnOf()` 取 `frame.firstElementChild`（出厂 shell 的第一个
-> **真实**元素就是侧栏列 —— `DocumentTitle` 渲染 `null`，不产生元素）。
+> `frameOf()` 只回退**前三级**：overlay → collapsed → leading。第四级查的是
+> `[data-sidebar-col]` —— 出厂布局根本不发布它，这一级只留给发布了该属性的其他 shell，
+> 见 [ADR-0001](./adr/0001-frame-anchor-contract.md)。后三个标记不参与 frame 定位：
+> `data-animating` / `data-dragging` 回答的是"这段时间在动、在不在拖"，`data-side` 是手柄自己的
+> 侧别（`pointerOverDrawer()` 单独查它）。
+> `columnOf()` 取 `frame.firstElementChild`（出厂 shell 的第一个**真实**元素就是侧栏列 ——
+> `DocumentTitle` 渲染 `null`，不产生元素）。
 
 ### 核对这张表：直接读出厂 shell 的源码
 
@@ -58,7 +63,10 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
      离开窗口、窗口 reflow 或拖动列宽时取消 —— 这让"扫过边缘"和"要用抽屉"区分开。
   1. 抽出后 `lastX <= RETAIN_MARGIN` 一律视为"还扶着边缘"，保持抽出。
   2. "指针在外面"的判定要经过 `CLOSE_DELAY_MS` 后的第二次确认；确认时若框架还在 `data-animating`
-     （或自家 toggle 未结算），收回**不执行**，只重新武装，等动画真的停下再判。
+     （或自家 toggle 未结算），收回**不执行**，只重新武装，等动画真的停下再判。所有重新武装**共用
+     同一个起点**（`closeWaitSince`），所以 `ANIMATION_HARD_STOP_MS` 量的是整段等待而不是每一段 ——
+     否则标记一旦永不清除，收回就会被无限推迟，抽屉再也关不上。等待的起点在"外面"这个结论不再成立时
+     一并作废（`cancelClose()` 与到期提前返回都清它），下一次等待总是按当场的状态重新起算。
   3. **收回是结论，结论必须有证据**（`pointerProvenOutside`）：窗口级离开，或一次仍有效的采样量在
      外面。**视口变更只作废证据、不作结论**（`onViewportChange`）：丢弃过期采样、取消停留与已武装
      的宽限收回，但绝不据此收回 —— 没有证据就原样保持，等新采样。
@@ -91,8 +99,9 @@ node tools/shell-source.mjs get /dsh/node_modules/@deepseek-ai/dsh-client-ui-lay
 兜底定时器清掉的，而且出厂 shell 自己的侧栏按钮也一样瞬变。
 
 所以 `toggleSidebar()` 在请求开合**之前**先调用 `armFrameMarker()`：把同一个标记写上
-（值 `PREARMED`，与 shell 的 `"true"` 可辨识），让 shell 随后写入的列宽落在一个**已经生效**的
-过渡上。shell 一旦接管，标记的所有权与生命周期都归它（它在 `transitionend` 或 600ms 兜底里清除）；
+（值是字符串 `"drawer"`，由常量 `PREARMED` 持有，与 shell 的 `"true"` 可辨识），让 shell 随后写入的
+列宽落在一个**已经生效的**过渡上。shell 一旦接管，标记的所有权与生命周期都归它（它在
+`transitionend` 或 600ms 兜底里清除）；
 shell 从未接管时（列宽其实没变的竞态），由本插件在该列过渡结束时撤回自己的标记，
 `ANIMATION_CEILING_MS` 只作兜底。理由与实测见 [ADR-0004](./adr/0004-arm-the-frame-before-toggling.md)。
 
@@ -112,12 +121,12 @@ shell 从未接管时（列宽其实没变的竞态），由本插件在该列�
 | `RETAIN_MARGIN` | 越过它才算离开；此距离内一律视为"还扶着边缘" |
 | `OPEN_SETTLED_WIDTH` | 宽度阈值：超过它才算"已抽出的抽屉"而非"正在移动的边缘" |
 | `HANDLE_SELECTOR` | 侧栏列宽手柄的匹配串（视为抽屉的一部分） |
-| `ANIMATION_POLL_MS` | 延迟收回 / 延迟抽出时轮询 `data-animating` 的间隔 |
+| `ANIMATION_POLL_MS` | 推迟收回 / 推迟抽出时轮询 `data-animating` 的间隔 |
 | `ANIMATION_CEILING_MS` | 轮询上限，防止框架永不撤下标记 |
-| `ANIMATION_HARD_STOP_MS` | 延迟收回 / 延迟抽出的绝对兜底上限 |
+| `ANIMATION_HARD_STOP_MS` | 推迟收回 / 推迟抽出的绝对兜底上限 |
 | `MARK` | 挂载期间设在 documentElement 上的标记 |
 | `ANIMATING_ATTR` | 列过渡进行中的框架标记 |
-| `PREARMED` | 请求 toggle 之前预置进该标记的值（与 shell 自己的 `"true"` 可辨识） |
+| `PREARMED` | 请求 toggle 之前预置进该标记的值，字符串 `"drawer"`（与 shell 自己的 `"true"` 可辨识） |
 | `COLLAPSED_ATTR` | 侧栏收起的框架标记 |
 | `DRAGGING_ATTR` | 正在拖拽列宽的框架标记 |
 | `LEADING_ATTR` | leading 座锚点（**条件渲染**，仅作兜底） |
@@ -148,7 +157,7 @@ shell 从未接管时（列宽其实没变的竞态），由本插件在该列�
 
 出厂 shell 在视口窄于 `SIDEBAR_AUTO_COLLAPSE` 时走另一套状态路径：收起态由 `narrowExpanded`
 （而非 `sidebar` 偏好）决定，跨阈值时该覆盖归零，而且**视口驱动的收起刻意不发布
-`data-animating`** —— 插件的延迟机制绝不能把"没有标记"读成"过渡刚结束"。两套夹具都建模了
+`data-animating`** —— 插件的推迟机制绝不能把"没有标记"读成"过渡刚结束"。两套夹具都建模了
 这套语义，并各有"夹具自身契约"用例守护（`client 0b`、`browser 1` 同款断言风格）；行为用例见
 behavior.md 第 20、21 行。改夹具时先问"出厂 shell 在这里到底发布什么"，工具见上文的
 `tools/shell-source.mjs`。

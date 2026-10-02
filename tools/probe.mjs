@@ -1,6 +1,6 @@
 /**
  * Diagnostic tool: serve the harness plus an instrumented copy of the client
- * bundle, then report what the page saw for one edge-hover attempt.
+ * bundle, then report what the page saw for one edge dwell.
  *
  * The instrumentation never ships: this tool rewrites `lib/client.js` in memory
  * (adding `window.__trace` records at the behavior's check points), serves that

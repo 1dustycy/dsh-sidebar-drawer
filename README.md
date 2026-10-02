@@ -65,7 +65,7 @@ dsh plugin --profile desktop remove dsh-sidebar-drawer
 node test/client.test.mjs    # 单元套件：vm + DOM 替身 + 会推进的虚拟时钟，不需要浏览器
 node test/browser.test.mjs   # 浏览器套件：真实 Chromium + CDP 真实鼠标事件与真实 CSS 动画
 npm test                     # 依次跑上面两套
-node tools/probe.mjs         # 诊断工具：打印一次边缘悬停的决策轨迹
+node tools/probe.mjs         # 诊断工具：打印一次边缘停留的决策轨迹
 npm pack --dry-run           # 确认发布内容
 ```
 
