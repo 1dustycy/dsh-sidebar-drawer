@@ -567,6 +567,34 @@ function mount() {
 	dispose();
 }
 
+/* 3b. The wait for a marker the frame never clears is bounded. Every re-arm shares one
+   start, so `ANIMATION_HARD_STOP_MS` measures the whole wait rather than each slice of
+   it: a transition that never ends delays the retraction, but cannot pin the drawer
+   open for good. */
+{
+	const { browser, dispose } = mount();
+	browser.moveAndRest(3, 200);
+	browser.move(600, 300);
+	/* The frame announces a column transition and then never ends it. */
+	browser.endTransition();
+	browser.frame.setAttribute("data-animating", "true");
+	browser.advance(100);
+	assert.equal(browser.timersOf(260), 1, "a close is pending");
+	browser.advance(2600);
+	assert.equal(
+		browser.layout.toggles,
+		1,
+		"a marker still being claimed keeps holding the retraction back"
+	);
+	browser.advance(1500);
+	assert.equal(
+		browser.layout.toggles,
+		2,
+		"and once the wait as a whole passes the hard stop, the same verdict retracts anyway"
+	);
+	dispose();
+}
+
 /* 4. Coming back inside before the grace expires cancels the retraction. */
 {
 	const { browser, dispose } = mount();
