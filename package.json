@@ -1,7 +1,7 @@
 {
   "name": "dsh-sidebar-drawer",
   "description": "Edge-hover drawer for the Web GUI left sidebar: reveal it by moving the pointer to the left screen edge, keep it while the pointer stays inside, retract it when the pointer leaves",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "license": "MIT",
   "scripts": {

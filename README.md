@@ -27,10 +27,10 @@
 
 ```bash
 # 从 npm 安装（推荐，带版本钉住）
-dsh plugin --profile desktop add dsh-sidebar-drawer@0.1.0
+dsh plugin --profile desktop add dsh-sidebar-drawer@0.1.1
 
-# 从 GitHub 安装（同样钉住版本，走仓库的 v0.1.0 tag）
-dsh plugin --profile desktop add "github:1dustycy/dsh-sidebar-drawer#v0.1.0"
+# 从 GitHub 安装（同样钉住版本，走仓库的 v0.1.1 tag）
+dsh plugin --profile desktop add "github:1dustycy/dsh-sidebar-drawer#v0.1.1"
 
 # 跟随 main 最新提交（便于拿到最新行为改动）
 dsh plugin --profile desktop add github:1dustycy/dsh-sidebar-drawer

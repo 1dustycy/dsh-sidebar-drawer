@@ -25,10 +25,10 @@ This is a DSH **plugin bundle**: it ships its own `cordis.patch.yml` and declare
 
 ```bash
 # From npm (recommended: pins the version)
-dsh plugin --profile desktop add dsh-sidebar-drawer@0.1.0
+dsh plugin --profile desktop add dsh-sidebar-drawer@0.1.1
 
-# From GitHub (also version-pinned, through the repo's v0.1.0 tag)
-dsh plugin --profile desktop add "github:1dustycy/dsh-sidebar-drawer#v0.1.0"
+# From GitHub (also version-pinned, through the repo's v0.1.1 tag)
+dsh plugin --profile desktop add "github:1dustycy/dsh-sidebar-drawer#v0.1.1"
 
 # Track the latest commit on main (to pick up behavior changes early)
 dsh plugin --profile desktop add github:1dustycy/dsh-sidebar-drawer
